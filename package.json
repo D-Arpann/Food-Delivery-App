@@ -1,0 +1,23 @@
+{
+  "name": "chito-mitho-monorepo",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint"
+  },
+  "devDependencies": {
+    "turbo": "^2.5.4"
+  },
+  "overrides": {
+    "react-device-frameset": {
+      "react": "",
+      "react-dom": "-dom"
+    }
+  },
+  "packageManager": "npm@11.6.2"
+}
