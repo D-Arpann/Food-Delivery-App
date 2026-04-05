@@ -1,3 +1,7 @@
+-- ==========================================
+-- FILE: 000_wipe_database.sql
+-- Description: Cleans the slate before running the schema
+-- ==========================================
 DROP TABLE IF EXISTS notifications CASCADE;
 DROP TABLE IF EXISTS order_items CASCADE;
 DROP TABLE IF EXISTS orders CASCADE;
