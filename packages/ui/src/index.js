@@ -1,3 +1,5 @@
+export * from './assets/index.js';
+export { FontProvider } from './src/FontProvider.jsx';
 export function Button({ children, variant = 'primary', ...props }) {
   const baseStyles = {
     display: 'inline-flex',
