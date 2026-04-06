@@ -5,6 +5,7 @@
   "main": "src/index.js",
   "type": "module",
   "dependencies": {
+    "@repo/utils": "*",
     "@supabase/supabase-js": "^2.49.4"
   }
 }

@@ -1,4 +1,27 @@
-import { TABLES, ORDER_STATUS } from '@repo/utils/constants.js';
+import { TABLES } from '@repo/utils';
+
+export async function fetchActiveRestaurants(client, options = {}) {
+  const { limit = 24 } = options;
+
+  try {
+    let query = client
+      .from(TABLES.FOOD_PLACES)
+      .select('id, name, description, image_url, address, is_active, created_at')
+      .eq('is_active', true)
+      .order('created_at', { ascending: false });
+
+    if (limit > 0) {
+      query = query.limit(limit);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('Error fetching active restaurants:', error);
+    return { data: null, error };
+  }
+}
 
 export async function fetchActiveMenu(client, foodPlaceId) {
   try {

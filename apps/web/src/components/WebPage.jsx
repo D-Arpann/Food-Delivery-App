@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { DeviceFrameset } from 'react-device-frameset'
 import 'react-device-frameset/styles/marvel-devices.min.css'
+import { AppScreenshot, HeroIllustration, Logo } from '@repo/ui'
 import './WebPage.css'
 
 const features = [
@@ -91,8 +92,11 @@ export default function WebPage({ onOpenLogin }) {
         const target = document.querySelector(href)
         if (target) {
           e.preventDefault()
+          const navbar = document.getElementById('navbar')
           const navbarHeight =
-            parseInt(getComputedStyle(document.documentElement).getPropertyValue('--navbar-height')) || 80
+            navbar?.getBoundingClientRect().height ||
+            parseInt(getComputedStyle(document.documentElement).getPropertyValue('--navbar-height')) ||
+            80
           const y = target.getBoundingClientRect().top + window.scrollY - navbarHeight
           window.scrollTo({ top: y, behavior: 'smooth' })
           setMenuOpen(false)
@@ -128,7 +132,7 @@ export default function WebPage({ onOpenLogin }) {
       <nav className={`navbar ${scrolled ? 'scrolled' : ''}`} id="navbar">
         <div className="container nav-content">
           <a href="#" className="nav-brand">
-            <img src="/logo.png" alt="Chito Mitho Logo" />
+            <img src={Logo} alt="Chito Mitho Logo" />
             <span>Chito Mitho</span>
           </a>
 
@@ -211,7 +215,7 @@ export default function WebPage({ onOpenLogin }) {
           </div>
 
           <div className="hero-image">
-            <img src="/hero-illustration.png" alt="Chito Mitho Illustration" />
+            <img src={HeroIllustration} alt="Chito Mitho Illustration" />
           </div>
         </div>
       </section>
@@ -255,7 +259,7 @@ export default function WebPage({ onOpenLogin }) {
           <div className="showcase-image reveal device-container">
             <DeviceFrameset device="iPhone X" color="black">
               <img
-                src="/app-screenshot.png"
+                src={AppScreenshot}
                 alt="Chito Mitho App Preview"
                 style={{ width: '100%', height: '100%', objectFit: 'cover' }}
               />
@@ -321,7 +325,7 @@ export default function WebPage({ onOpenLogin }) {
           <div className="footer-grid">
             <div className="footer-brand">
               <a href="#" className="nav-brand">
-                <img src="/logo.png" alt="Chito Mitho Logo" />
+                <img src={Logo} alt="Chito Mitho Logo" />
                 <span>Chito Mitho</span>
               </a>
               <p>
