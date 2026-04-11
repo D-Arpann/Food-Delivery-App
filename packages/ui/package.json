@@ -5,6 +5,7 @@
   "main": "src/index.js",
   "type": "module",
   "dependencies": {
+    "@repo/utils": "*",
     "@expo-google-fonts/outfit": "^0.4.3",
     "expo-font": "~14.0.0",
     "react": "19.1.0"

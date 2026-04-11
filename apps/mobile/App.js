@@ -16,7 +16,7 @@ import { useFonts } from 'expo-font';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { createAppClient } from '@repo/api';
-import { Input, usePhoneAuthFlow } from '@repo/ui';
+import { CartProvider, Input, usePhoneAuthFlow } from '@repo/ui';
 import {
   AUTH_COPY,
   AUTH_THEME,
@@ -227,13 +227,15 @@ function MobileAuthApp() {
 
   if (session) {
     return (
-      <DiscoveryScreen
-        session={session}
-        supabase={supabase}
-        topInset={topInset}
-        bottomInset={insets.bottom}
-        brandLogo={BRAND_LOGO}
-      />
+      <CartProvider>
+        <DiscoveryScreen
+          session={session}
+          supabase={supabase}
+          topInset={topInset}
+          bottomInset={insets.bottom}
+          brandLogo={BRAND_LOGO}
+        />
+      </CartProvider>
     );
   }
 

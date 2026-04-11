@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { fetchRestaurantFeed, logout } from '@repo/api';
+import { useCart } from '@repo/ui';
 import {
   filterMenuItems,
   filterRestaurantFeed,
@@ -88,6 +89,24 @@ function SectionHeader({ title }) {
       <View style={styles.sectionActionWrap}>
         <Text style={styles.sectionAction}>Show all</Text>
         <Ionicons name="chevron-forward" size={16} color="#F8964F" />
+      </View>
+    </View>
+  );
+}
+
+function MenuQuantityControl({ quantity, onIncrease, onDecrease }) {
+  return (
+    <View style={styles.menuQtyControl}>
+      <View style={styles.menuQtyInner}>
+        <View style={styles.menuQtyPattern} />
+        <FoodPatternLayer color="rgba(214, 96, 24, 0.42)" />
+        <Pressable style={styles.menuQtyAction} onPress={onDecrease}>
+          <Ionicons name="remove" size={15} color="#FFFFFF" />
+        </Pressable>
+        <Text style={styles.menuQtyValue}>{quantity}</Text>
+        <Pressable style={styles.menuQtyAction} onPress={onIncrease}>
+          <Ionicons name="add" size={16} color="#FFFFFF" />
+        </Pressable>
       </View>
     </View>
   );
@@ -173,19 +192,27 @@ function NonFeaturedCard({ restaurant, onPress }) {
   );
 }
 
-function MenuItemRow({ item }) {
+function MenuItemRow({ item, active = false, onPress }) {
   return (
-    <View style={styles.menuItemRow}>
+    <Pressable style={[styles.menuItemRow, active && styles.menuItemRowActive]} onPress={onPress}>
+      {active ? (
+        <>
+          <View style={styles.menuItemRowPattern} />
+          <FoodPatternLayer color="rgba(214, 96, 24, 0.4)" />
+        </>
+      ) : null}
       <View style={styles.menuItemRowInner}>
         {item.image_url ? (
           <Image source={{ uri: item.image_url }} style={styles.menuItemThumb} />
         ) : (
           <View style={styles.menuItemThumbPlaceholder} />
         )}
-        <Text style={styles.menuItemName} numberOfLines={1}>{item.name}</Text>
-        <Text style={styles.menuItemPrice}>{formatNpr(item.price)}</Text>
+        <Text style={[styles.menuItemName, active && styles.menuItemNameActive]} numberOfLines={1}>
+          {item.name}
+        </Text>
+        <Text style={[styles.menuItemPrice, active && styles.menuItemPriceActive]}>{formatNpr(item.price)}</Text>
       </View>
-    </View>
+    </Pressable>
   );
 }
 
@@ -214,11 +241,13 @@ function BottomNav({ activeTab, onChange, bottomInset }) {
             style={[styles.bottomNavItem, active && styles.bottomNavItemActive]}
             onPress={() => onChange(tab.key)}
           >
-            <Ionicons
-              name={getTabIcon(tab.key, active)}
-              size={22}
-              color={active ? '#FFFFFF' : '#6E6E6E'}
-            />
+            <View style={styles.bottomNavIconWrap}>
+              <Ionicons
+                name={getTabIcon(tab.key, active)}
+                size={22}
+                color={active ? '#FFFFFF' : '#6E6E6E'}
+              />
+            </View>
           </Pressable>
         );
       })}
@@ -242,7 +271,17 @@ export function DiscoveryScreen({ session, supabase, topInset = 0, bottomInset =
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState(TAB_HOME);
   const [selectedRestaurantId, setSelectedRestaurantId] = useState(null);
+  const [menuSelection, setMenuSelection] = useState({ itemId: null, quantity: 0 });
   const [logoutLoading, setLogoutLoading] = useState(false);
+
+  const {
+    restaurant: cartRestaurant,
+    items: cartItems,
+    notice: cartNotice,
+    itemCount,
+    incrementItem,
+    dismissNotice,
+  } = useCart();
 
   useEffect(() => {
     let mounted = true;
@@ -276,6 +315,18 @@ export function DiscoveryScreen({ session, supabase, topInset = 0, bottomInset =
       mounted = false;
     };
   }, [supabase]);
+
+  useEffect(() => {
+    if (!cartNotice) {
+      return undefined;
+    }
+
+    const timer = setTimeout(() => {
+      dismissNotice();
+    }, 2800);
+
+    return () => clearTimeout(timer);
+  }, [cartNotice, dismissNotice]);
 
   const userName = session?.user?.user_metadata?.full_name || session?.user?.phone || 'User';
   const firstName = userName.split(' ')[0] || userName;
@@ -329,10 +380,76 @@ export function DiscoveryScreen({ session, supabase, topInset = 0, bottomInset =
     [selectedMenuItems],
   );
 
+  const selectedMenuItem = useMemo(
+    () => selectedMenuItems.find((item) => item.id === menuSelection.itemId) || null,
+    [selectedMenuItems, menuSelection.itemId],
+  );
+
+  const selectedMenuQuantity = selectedMenuItem ? menuSelection.quantity : 0;
+  const canAddFromSelectedRestaurant = !cartRestaurant?.id || cartRestaurant.id === selectedRestaurant?.id;
+
+  useEffect(() => {
+    if (menuSelection.itemId && !selectedMenuItem) {
+      setMenuSelection({ itemId: null, quantity: 0 });
+    }
+  }, [selectedMenuItem, menuSelection.itemId]);
+
   const openRestaurant = (restaurantId) => {
     setActiveTab(TAB_HOME);
     setSelectedRestaurantId(restaurantId);
     setSearchQuery('');
+    setMenuSelection({ itemId: null, quantity: 0 });
+  };
+
+  const handleSelectMenuItem = (item) => {
+    if (!item) {
+      return;
+    }
+
+    setMenuSelection((current) => {
+      if (current.itemId === item.id && current.quantity > 0) {
+        return current;
+      }
+      return { itemId: item.id, quantity: 1 };
+    });
+  };
+
+  const handleMenuQuantityIncrease = () => {
+    if (!selectedMenuItem) {
+      return;
+    }
+
+    setMenuSelection((current) => {
+      const currentQty = current.itemId === selectedMenuItem.id ? current.quantity : 0;
+      return { itemId: selectedMenuItem.id, quantity: Math.min(currentQty + 1, 99) };
+    });
+  };
+
+  const handleMenuQuantityDecrease = () => {
+    if (!selectedMenuItem) {
+      return;
+    }
+
+    setMenuSelection((current) => {
+      const currentQty = current.itemId === selectedMenuItem.id ? current.quantity : 0;
+      const nextQty = Math.max(currentQty - 1, 0);
+      if (nextQty === 0) {
+        return { itemId: null, quantity: 0 };
+      }
+      return { itemId: selectedMenuItem.id, quantity: nextQty };
+    });
+  };
+
+  const handleMenuAddToCart = () => {
+    if (!selectedMenuItem || !selectedRestaurant || selectedMenuQuantity < 1 || !canAddFromSelectedRestaurant) {
+      return;
+    }
+
+    for (let index = 0; index < selectedMenuQuantity; index += 1) {
+      incrementItem(selectedRestaurant, selectedMenuItem);
+    }
+
+    setMenuSelection({ itemId: null, quantity: 0 });
   };
 
   const handleLogout = async () => {
@@ -358,6 +475,7 @@ export function DiscoveryScreen({ session, supabase, topInset = 0, bottomInset =
                 onPress={() => {
                   setSelectedRestaurantId(null);
                   setSearchQuery('');
+                  setMenuSelection({ itemId: null, quantity: 0 });
                 }}
               >
                 <Ionicons name="arrow-back" size={22} color="#1E1E1E" />
@@ -397,7 +515,12 @@ export function DiscoveryScreen({ session, supabase, topInset = 0, bottomInset =
               ) : (
                 <View style={styles.menuPanelContent}>
                   {featuredMenuItems.map((item) => (
-                    <MenuItemRow key={item.id} item={item} />
+                    <MenuItemRow
+                      key={item.id}
+                      item={item}
+                      active={selectedMenuItem?.id === item.id && selectedMenuQuantity > 0}
+                      onPress={() => handleSelectMenuItem(item)}
+                    />
                   ))}
                 </View>
               )}
@@ -408,9 +531,43 @@ export function DiscoveryScreen({ session, supabase, topInset = 0, bottomInset =
               {!regularMenuItems.length ? (
                 <Text style={styles.menuRegularHint}>No regular items in this menu.</Text>
               ) : (
-                regularMenuItems.map((item) => <MenuItemRow key={item.id} item={item} />)
+                regularMenuItems.map((item) => (
+                  <MenuItemRow
+                    key={item.id}
+                    item={item}
+                    active={selectedMenuItem?.id === item.id && selectedMenuQuantity > 0}
+                    onPress={() => handleSelectMenuItem(item)}
+                  />
+                ))
               )}
             </View>
+
+            {!!selectedMenuItem && selectedMenuQuantity > 0 && (
+              <View style={styles.menuBottomActions}>
+                <MenuQuantityControl
+                  quantity={selectedMenuQuantity}
+                  onIncrease={handleMenuQuantityIncrease}
+                  onDecrease={handleMenuQuantityDecrease}
+                />
+
+                <Pressable
+                  style={[
+                    styles.menuAddToCartButton,
+                    !canAddFromSelectedRestaurant && styles.menuAddToCartButtonDisabled,
+                  ]}
+                  onPress={handleMenuAddToCart}
+                  disabled={!canAddFromSelectedRestaurant}
+                >
+                  <View style={styles.menuAddToCartInner}>
+                    <View style={styles.menuAddToCartPattern} />
+                    <FoodPatternLayer color="rgba(214, 96, 24, 0.42)" />
+                    <Text style={styles.menuAddToCartText}>
+                      {canAddFromSelectedRestaurant ? 'Add to cart' : 'Single restaurant cart'}
+                    </Text>
+                  </View>
+                </Pressable>
+              </View>
+            )}
           </View>
         </View>
       </View>
@@ -419,6 +576,12 @@ export function DiscoveryScreen({ session, supabase, topInset = 0, bottomInset =
 
   return (
     <View style={[styles.screen, styles.homeScreen, { paddingTop: topInset + 34, paddingBottom: bottomInset + 10 }]}> 
+      {cartNotice ? (
+        <View style={styles.noticeBarFloating}>
+          <Text style={styles.noticeText}>{cartNotice}</Text>
+        </View>
+      ) : null}
+
       {activeTab === TAB_HOME && (
         <>
           <ScrollView
@@ -513,7 +676,7 @@ export function DiscoveryScreen({ session, supabase, topInset = 0, bottomInset =
         <>
           <PlaceholderPane
             title="Orders Coming Soon"
-            subtitle="Your order history and live tracking will appear here in the next patch."
+            subtitle="Order tracking will connect once checkout history lands in the next patch."
           />
           <BottomNav activeTab={activeTab} onChange={setActiveTab} bottomInset={bottomInset} />
         </>
@@ -522,8 +685,8 @@ export function DiscoveryScreen({ session, supabase, topInset = 0, bottomInset =
       {activeTab === TAB_CART && (
         <>
           <PlaceholderPane
-            title="Cart Coming Soon"
-            subtitle="Item add-to-cart and checkout flow will be added in the next patch."
+            title="Cart State Ready"
+            subtitle={itemCount ? `${itemCount} item${itemCount === 1 ? '' : 's'} added. The cart screen ships in the next patch.` : 'Add items from one restaurant. The cart screen ships in the next patch.'}
           />
           <BottomNav activeTab={activeTab} onChange={setActiveTab} bottomInset={bottomInset} />
         </>
