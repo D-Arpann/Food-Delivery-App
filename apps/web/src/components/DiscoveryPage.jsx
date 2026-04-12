@@ -1,14 +1,23 @@
 import { useEffect, useMemo, useState } from 'react';
-import { createCheckoutOrder, fetchRestaurantFeed } from '@repo/api';
-import { Logo, useCart } from '@repo/ui';
+import {
+  createCheckoutOrder,
+  fetchCustomerSettings,
+  fetchRestaurantFeed,
+  updateCustomerSettings,
+} from '@repo/api';
+import { Input, Logo, useCart } from '@repo/ui';
 import {
   filterMenuItems,
   filterRestaurantFeed,
   formatNpr,
+  getDefaultSavedAddress,
   getDeliveryFee,
   getRestaurantRating,
+  hasMinDigits,
   isValidDeliveryAddress,
   normalizeDeliveryAddress,
+  normalizeSavedAddresses,
+  resolveDefaultSavedAddressId,
 } from '@repo/utils';
 import './DiscoveryPage.css';
 
@@ -88,6 +97,15 @@ function IconHome() {
   );
 }
 
+function IconProfile() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" aria-hidden="true">
+      <circle cx="12" cy="8" r="3.5" />
+      <path d="M5 19c1.9-3 4.2-4.5 7-4.5s5.1 1.5 7 4.5" />
+    </svg>
+  );
+}
+
 function QuantityControl({ quantity, onDecrease, onIncrease }) {
   return (
     <div className="discover-qty">
@@ -139,7 +157,14 @@ function RestaurantCard({ restaurant, active, compact = false, onSelect }) {
   );
 }
 
-function MenuItemCard({ item, quantity, canAdd, onAdd, onIncrease, onDecrease }) {
+function MenuItemCard({
+  item,
+  quantity,
+  canAdd,
+  onAdd,
+  onIncrease,
+  onDecrease,
+}) {
   return (
     <article className="discover-menu-item">
       <img src={item.image_url || Logo} alt={item.name} />
@@ -200,8 +225,40 @@ function CartLineItem({ item, onIncrease, onDecrease }) {
   );
 }
 
+function buildSessionCustomerSettings(session) {
+  const user = session?.user || {};
+  const metadata = user.user_metadata || {};
+  const phone = metadata.phone || user.phone || '';
+  const fullName = metadata.full_name || phone || 'Customer';
+  const addresses = normalizeSavedAddresses(
+    metadata.saved_addresses,
+    metadata.address || 'Naxal, Kathmandu',
+  );
+  const defaultAddressId = resolveDefaultSavedAddressId(addresses, metadata.default_address_id);
+  const defaultAddress = getDefaultSavedAddress(
+    addresses,
+    defaultAddressId,
+    metadata.address || 'Naxal, Kathmandu',
+  );
+
+  return {
+    id: user.id || null,
+    fullName,
+    email: metadata.email || user.email || '',
+    phone,
+    addresses,
+    defaultAddressId,
+    defaultAddress,
+  };
+}
+
 export default function DiscoveryPage({ session, supabase, onLogout }) {
-  const initialAddress = normalizeDeliveryAddress(session?.user?.user_metadata?.address);
+  const isTemporaryAuth = Boolean(session?.isTemporaryAuth);
+  const sessionProfileSettings = useMemo(
+    () => buildSessionCustomerSettings(session),
+    [session],
+  );
+  const initialAddress = normalizeDeliveryAddress(sessionProfileSettings.defaultAddress);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -212,6 +269,16 @@ export default function DiscoveryPage({ session, supabase, onLogout }) {
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [checkoutMessage, setCheckoutMessage] = useState('');
   const [checkoutSuccess, setCheckoutSuccess] = useState(null);
+  const [profileSettings, setProfileSettings] = useState(sessionProfileSettings);
+  const [profileForm, setProfileForm] = useState({
+    fullName: sessionProfileSettings.fullName,
+    phone: sessionProfileSettings.phone,
+    password: '',
+  });
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileMessage, setProfileMessage] = useState('');
+  const [profileError, setProfileError] = useState('');
 
   const {
     restaurant: cartRestaurant,
@@ -236,6 +303,16 @@ export default function DiscoveryPage({ session, supabase, onLogout }) {
 
     return () => clearTimeout(timer);
   }, [cartNotice, dismissNotice]);
+
+  useEffect(() => {
+    setProfileSettings(sessionProfileSettings);
+    setProfileForm({
+      fullName: sessionProfileSettings.fullName,
+      phone: sessionProfileSettings.phone,
+      password: '',
+    });
+    setDeliveryAddress(normalizeDeliveryAddress(sessionProfileSettings.defaultAddress));
+  }, [sessionProfileSettings]);
 
   useEffect(() => {
     if (cartItems.length && checkoutSuccess) {
@@ -272,6 +349,48 @@ export default function DiscoveryPage({ session, supabase, onLogout }) {
       active = false;
     };
   }, [supabase]);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadProfileSettings = async () => {
+      if (isTemporaryAuth || !session?.user?.id) {
+        return;
+      }
+
+      setProfileLoading(true);
+      setProfileError('');
+
+      const { data, error: customerSettingsError } = await fetchCustomerSettings(
+        supabase,
+        session.user.id,
+      );
+
+      if (!active) {
+        return;
+      }
+
+      if (customerSettingsError) {
+        setProfileError('Could not load your profile settings right now.');
+      } else if (data) {
+        setProfileSettings(data);
+        setProfileForm({
+          fullName: data.fullName || '',
+          phone: data.phone || '',
+          password: '',
+        });
+        setDeliveryAddress(normalizeDeliveryAddress(data.defaultAddress));
+      }
+
+      setProfileLoading(false);
+    };
+
+    loadProfileSettings();
+
+    return () => {
+      active = false;
+    };
+  }, [isTemporaryAuth, session?.user?.id, supabase]);
 
   const filteredRestaurants = useMemo(
     () => filterRestaurantFeed(feed, searchQuery),
@@ -315,6 +434,7 @@ export default function DiscoveryPage({ session, supabase, onLogout }) {
   }, [cartItems]);
 
   const canAddFromActiveRestaurant = !cartRestaurant?.id || cartRestaurant.id === activeRestaurant?.id;
+
   const checkoutDeliveryFee = cartRestaurant?.id ? getDeliveryFee(cartRestaurant.id) : 0;
   const checkoutSummary = getSummary(checkoutDeliveryFee);
   const hasValidAddress = isValidDeliveryAddress(deliveryAddress);
@@ -334,12 +454,22 @@ export default function DiscoveryPage({ session, supabase, onLogout }) {
     ? 'discover-note'
     : 'discover-error';
 
-  const fullName = session?.user?.user_metadata?.full_name || session?.user?.phone || 'Hey User';
+  const fullName = profileSettings.fullName || session?.user?.phone || 'Hey User';
   const firstName = fullName.split(' ')[0] || fullName;
+  const profileFieldCount = profileSettings.addresses?.length || 0;
+  const profileScreenStatus = isTemporaryAuth ? 'Temporary' : 'Connected';
 
   const handleOpenRestaurant = (restaurantId) => {
     setActiveRestaurantId(restaurantId);
     setScreen('restaurant');
+  };
+
+  const handleOpenBrowseScreen = () => {
+    setScreen('browse');
+  };
+
+  const handleOpenProfileScreen = () => {
+    setScreen('profile');
   };
 
   const handleOpenCartScreen = () => {
@@ -370,6 +500,21 @@ export default function DiscoveryPage({ session, supabase, onLogout }) {
     setCheckoutMessage('');
     setCheckoutSuccess(null);
 
+    if (isTemporaryAuth) {
+      setCheckoutSuccess({
+        orderId: `temp-${Date.now()}`,
+        itemCount: checkoutSummary.itemCount,
+        subtotal: checkoutSummary.subtotal,
+        deliveryFee: checkoutDeliveryFee,
+        totalAmount: checkoutSummary.total,
+        restaurantName: cartRestaurant?.name || '',
+      });
+      setCheckoutMessage(`Temporary login mode: simulated order (${checkoutSummary.itemCount} items).`);
+      clearCart();
+      setCheckoutLoading(false);
+      return;
+    }
+
     const { data, error: checkoutError } = await createCheckoutOrder(supabase, {
       customerId: session?.user?.id,
       foodPlaceId: cartRestaurant.id,
@@ -396,22 +541,118 @@ export default function DiscoveryPage({ session, supabase, onLogout }) {
     setCheckoutLoading(false);
   };
 
+  const handleSaveProfile = async () => {
+    const nextFullName = String(profileForm.fullName || '').trim();
+    const nextPhone = String(profileForm.phone || '').trim();
+    const nextPassword = String(profileForm.password || '');
+
+    if (!nextFullName) {
+      setProfileError('Enter your full name.');
+      setProfileMessage('');
+      return;
+    }
+
+    if (!hasMinDigits(nextPhone, 6)) {
+      setProfileError('Enter a valid phone number.');
+      setProfileMessage('');
+      return;
+    }
+
+    if (nextPassword && nextPassword.length < 6) {
+      setProfileError('New password should be at least 6 characters.');
+      setProfileMessage('');
+      return;
+    }
+
+    setProfileSaving(true);
+    setProfileError('');
+    setProfileMessage('');
+
+    if (isTemporaryAuth) {
+      setProfileSettings((current) => ({
+        ...current,
+        fullName: nextFullName,
+        phone: nextPhone,
+      }));
+      setProfileForm((current) => ({
+        ...current,
+        fullName: nextFullName,
+        phone: nextPhone,
+        password: '',
+      }));
+      setProfileMessage('Temporary login mode: profile changes are saved only for this session.');
+      setProfileSaving(false);
+      return;
+    }
+
+    const { data, error: saveError } = await updateCustomerSettings(supabase, {
+      fullName: nextFullName,
+      phone: nextPhone,
+      password: nextPassword,
+      addresses: profileSettings.addresses,
+      defaultAddressId: profileSettings.defaultAddressId,
+    });
+
+    if (saveError) {
+      setProfileError(saveError.message || 'Could not save your profile right now.');
+      setProfileSaving(false);
+      return;
+    }
+
+    const updatedSettings = {
+      ...profileSettings,
+      ...data,
+      fullName: data?.fullName || nextFullName,
+      phone: data?.phone || nextPhone,
+    };
+
+    setProfileSettings(updatedSettings);
+    setProfileForm((current) => ({
+      ...current,
+      fullName: updatedSettings.fullName,
+      phone: updatedSettings.phone,
+      password: '',
+    }));
+    setDeliveryAddress(normalizeDeliveryAddress(updatedSettings.defaultAddress));
+    setProfileMessage('Your profile details are up to date.');
+    setProfileSaving(false);
+  };
+
+  const stageTitle = screen === 'browse'
+    ? 'Browse restaurants'
+    : screen === 'profile'
+      ? 'Profile settings'
+      : activeRestaurant?.name || 'Menu and cart';
+  const stageSubtitle = screen === 'browse'
+    ? 'Pick a restaurant and open its menu with checkout in one focused screen.'
+    : screen === 'profile'
+      ? 'Update your name, phone number, and password from one place.'
+      : 'Add items, review your cart, and checkout without leaving this view.';
+
   return (
     <main className="discover-shell">
       <nav className="discover-nav">
         <div className="discover-nav-inner">
-          <button type="button" className="discover-nav-brand" onClick={() => setScreen('browse')}>
+          <button type="button" className="discover-nav-brand" onClick={handleOpenBrowseScreen}>
             <img src={Logo} alt="Chito Mitho logo" />
             <span>Chito Mitho</span>
           </button>
 
           <div className="discover-nav-actions">
-            {screen === 'restaurant' && (
-              <button type="button" className="discover-main-btn" onClick={() => setScreen('browse')}>
+            {screen !== 'browse' && (
+              <button type="button" className="discover-main-btn" onClick={handleOpenBrowseScreen}>
                 <IconHome />
                 Main page
               </button>
             )}
+            <button
+              type="button"
+              className={`discover-main-btn ${screen === 'profile' ? 'is-active' : ''}`}
+              onClick={handleOpenProfileScreen}
+            >
+              <IconProfile />
+              Profile
+            </button>
             <button
               className="discover-cart-chip"
               type="button"
@@ -421,7 +662,7 @@ export default function DiscoveryPage({ session, supabase, onLogout }) {
               Cart <span>{itemCount}</span>
             </button>
             <button className="discover-logout" onClick={onLogout}>
-              Logout
+              {isTemporaryAuth ? 'Exit temp login' : 'Logout'}
             </button>
           </div>
         </div>
@@ -430,32 +671,42 @@ export default function DiscoveryPage({ session, supabase, onLogout }) {
       <section className="discover-stage">
         <header className="discover-stage-head">
           <p className="discover-kicker">Hey {firstName}</p>
-          <h1>{screen === 'browse' ? 'Browse restaurants' : activeRestaurant?.name || 'Menu and cart'}</h1>
-          <p className="discover-subtitle">
-            {screen === 'browse'
-              ? 'Pick a restaurant and open its menu with checkout in one focused screen.'
-              : 'Add items, review your cart, and checkout without leaving this view.'}
-          </p>
+          <h1>{stageTitle}</h1>
+          <p className="discover-subtitle">{stageSubtitle}</p>
         </header>
 
         <div className="discover-stage-row">
-          <SearchField
-            value={searchQuery}
-            onChange={setSearchQuery}
-            placeholder={screen === 'browse' ? 'Search restaurants or menu items' : 'Search menu items'}
-          />
+          {screen === 'profile' ? (
+            <div className="discover-stage-panel">
+              <span>Signed in as</span>
+              <strong>{profileSettings.email || 'No email on file'}</strong>
+              <p>{profileSettings.defaultAddress || 'Default delivery address not available yet.'}</p>
+            </div>
+          ) : (
+            <SearchField
+              value={searchQuery}
+              onChange={setSearchQuery}
+              placeholder={screen === 'browse' ? 'Search restaurants or menu items' : 'Search menu items'}
+            />
+          )}
 
           <div className="discover-kpis">
             <article>
-              <span>{screen === 'browse' ? 'Restaurants' : 'Menu Items'}</span>
-              <strong>{screen === 'browse' ? filteredRestaurants.length : activeMenuItems.length}</strong>
+              <span>{screen === 'browse' ? 'Restaurants' : screen === 'profile' ? 'Saved Addresses' : 'Menu Items'}</span>
+              <strong>{screen === 'browse' ? filteredRestaurants.length : screen === 'profile' ? profileFieldCount : activeMenuItems.length}</strong>
             </article>
             <article>
-              <span>Cart Total</span>
-              <strong>{formatNpr(checkoutSummary.total)}</strong>
+              <span>{screen === 'profile' ? 'Session' : 'Cart Total'}</span>
+              <strong>{screen === 'profile' ? profileScreenStatus : formatNpr(checkoutSummary.total)}</strong>
             </article>
           </div>
         </div>
+
+        {isTemporaryAuth && (
+          <p className="discover-note">
+            Temporary login mode: checkout is simulated and this login clears on refresh.
+          </p>
+        )}
 
         {!!cartNotice && (
           <div className="discover-notice">
@@ -519,11 +770,123 @@ export default function DiscoveryPage({ session, supabase, onLogout }) {
                 </div>
               </>
             )}
+
+            {!loading && !error && !!featuredRestaurants.length && !remainingRestaurants.length && (
+              <p className="discover-note discover-note-muted">
+                All current results are already shown in featured.
+              </p>
+            )}
+          </section>
+        ) : screen === 'profile' ? (
+          <section className="discover-profile">
+            <div className="discover-profile-grid">
+              <aside className="discover-profile-panel">
+                <div className="discover-profile-hero">
+                  <span className="discover-profile-badge">Customer Settings</span>
+                  <h2>{profileSettings.fullName || 'Your account'}</h2>
+                  <p>Keep your web profile updated so checkout and account details stay consistent.</p>
+                </div>
+
+                <div className="discover-profile-summary">
+                  <div>
+                    <span>Name</span>
+                    <strong>{profileSettings.fullName || 'Not set'}</strong>
+                  </div>
+                  <div>
+                    <span>Phone</span>
+                    <strong>{profileSettings.phone || 'Not set'}</strong>
+                  </div>
+                  <div>
+                    <span>Email</span>
+                    <strong>{profileSettings.email || 'Not set'}</strong>
+                  </div>
+                  <div>
+                    <span>Default address</span>
+                    <strong>{profileSettings.defaultAddress || 'Not available'}</strong>
+                  </div>
+                </div>
+              </aside>
+
+              <section className="discover-profile-form-card">
+                <div className="discover-profile-form-head">
+                  <div>
+                    <h3>Personal details</h3>
+                    <p>Edit the same name, phone number, and password fields described in Story 5.</p>
+                  </div>
+                  <span>{isTemporaryAuth ? 'Temp session' : 'Synced to Supabase'}</span>
+                </div>
+
+                {profileLoading ? (
+                  <p className="discover-note">Loading profile settings...</p>
+                ) : null}
+
+                {!!profileMessage ? (
+                  <p className="discover-profile-alert" data-state="success">
+                    {profileMessage}
+                  </p>
+                ) : null}
+
+                {!!profileError ? (
+                  <p className="discover-profile-alert" data-state="error">
+                    {profileError}
+                  </p>
+                ) : null}
+
+                <div className="discover-profile-fields">
+                  <Input
+                    label="Full name"
+                    placeholder="Your full name"
+                    value={profileForm.fullName}
+                    onChangeText={(value) => {
+                      setProfileForm((current) => ({ ...current, fullName: value }));
+                      if (profileError) {
+                        setProfileError('');
+                      }
+                    }}
+                  />
+
+                  <Input
+                    label="Phone number"
+                    placeholder="98XXXXXXXX"
+                    type="tel"
+                    value={profileForm.phone}
+                    onChangeText={(value) => {
+                      setProfileForm((current) => ({ ...current, phone: value }));
+                      if (profileError) {
+                        setProfileError('');
+                      }
+                    }}
+                  />
+
+                  <Input
+                    label="New password"
+                    placeholder="At least 6 characters"
+                    type="password"
+                    value={profileForm.password}
+                    onChangeText={(value) => {
+                      setProfileForm((current) => ({ ...current, password: value }));
+                      if (profileError) {
+                        setProfileError('');
+                      }
+                    }}
+                  />
+
+                  <button
+                    type="button"
+                    className="discover-profile-save"
+                    onClick={handleSaveProfile}
+                    disabled={profileSaving}
+                  >
+                    {profileSaving ? 'Saving profile...' : 'Save profile'}
+                  </button>
+                </div>
+              </section>
+            </div>
           </section>
         ) : (
           <section className="discover-workbench">
             <header className="discover-workbench-head">
-              <button type="button" className="discover-back-btn" onClick={() => setScreen('browse')}>
+              <button type="button" className="discover-back-btn" onClick={handleOpenBrowseScreen}>
                 <span className="discover-back-icon" aria-hidden="true">
                   <IconArrowLeft />
                 </span>
