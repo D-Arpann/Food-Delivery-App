@@ -1,4 +1,11 @@
-import { TABLES, USER_ROLES, onlyDigits } from '@repo/utils';
+import {
+  TABLES,
+  USER_ROLES,
+  getDefaultSavedAddress,
+  normalizeSavedAddresses,
+  onlyDigits,
+  resolveDefaultSavedAddressId,
+} from '@repo/utils';
 
 function fallbackEmail(phone, userId) {
   const phoneDigits = onlyDigits(phone);
@@ -206,6 +213,156 @@ export async function completeSignupProfile(client, payload) {
   }
 
   return { data: profileData, error: null };
+}
+
+function buildCustomerSettingsRecord({ profile, user }) {
+  const metadata = user?.user_metadata || {};
+  const phone = profile?.phone || user?.phone || metadata.phone || '';
+  const fullName =
+    profile?.full_name ||
+    metadata.full_name ||
+    fallbackName(phone);
+  const email =
+    profile?.email ||
+    user?.email ||
+    metadata.email ||
+    fallbackEmail(phone, profile?.id || user?.id);
+  const role = profile?.role || metadata.role || USER_ROLES.CUSTOMER;
+  const addresses = normalizeSavedAddresses(metadata.saved_addresses, metadata.address || 'Naxal, Kathmandu');
+  const defaultAddressId = resolveDefaultSavedAddressId(addresses, metadata.default_address_id);
+  const defaultAddress = getDefaultSavedAddress(addresses, defaultAddressId, metadata.address || 'Naxal, Kathmandu');
+
+  return {
+    id: profile?.id || user?.id || null,
+    fullName,
+    email,
+    phone,
+    role,
+    addresses,
+    defaultAddressId,
+    defaultAddress,
+  };
+}
+
+export async function fetchCustomerSettings(client, userId) {
+  try {
+    const { data: userData, error: userError } = await client.auth.getUser();
+    if (userError) {
+      return { data: null, error: userError };
+    }
+
+    const user = userData?.user || null;
+    const targetUserId = userId || user?.id;
+
+    if (!targetUserId) {
+      throw new Error('Missing customer id for profile settings.');
+    }
+
+    const { data: profile, error: profileError } = await client
+      .from(TABLES.PROFILES)
+      .select('id, full_name, email, phone, role, avatar_url')
+      .eq('id', targetUserId)
+      .maybeSingle();
+
+    if (profileError) {
+      throw profileError;
+    }
+
+    return {
+      data: buildCustomerSettingsRecord({ profile, user }),
+      error: null,
+    };
+  } catch (error) {
+    console.error('Error fetching customer settings:', error);
+    return { data: null, error };
+  }
+}
+
+export async function updateCustomerSettings(client, payload = {}) {
+  const {
+    full_name,
+    fullName,
+    phone,
+    password = '',
+    addresses = [],
+    defaultAddressId = '',
+  } = payload;
+
+  try {
+    const { data: userData, error: userError } = await client.auth.getUser();
+    if (userError) {
+      throw userError;
+    }
+
+    const user = userData?.user;
+    if (!user?.id) {
+      throw new Error('No authenticated user found for settings update.');
+    }
+
+    const resolvedPhone = String(phone || user.phone || user.user_metadata?.phone || '').trim();
+    const resolvedFullName = String(
+      full_name ||
+      fullName ||
+      user.user_metadata?.full_name ||
+      fallbackName(resolvedPhone),
+    ).trim();
+
+    const normalizedAddresses = normalizeSavedAddresses(
+      addresses,
+      user.user_metadata?.address || 'Naxal, Kathmandu',
+    );
+    const resolvedDefaultAddressId = resolveDefaultSavedAddressId(
+      normalizedAddresses,
+      defaultAddressId || user.user_metadata?.default_address_id,
+    );
+    const resolvedDefaultAddress = getDefaultSavedAddress(
+      normalizedAddresses,
+      resolvedDefaultAddressId,
+      user.user_metadata?.address || 'Naxal, Kathmandu',
+    );
+
+    const nextAuthPayload = {
+      data: {
+        ...user.user_metadata,
+        full_name: resolvedFullName,
+        phone: resolvedPhone,
+        saved_addresses: normalizedAddresses,
+        default_address_id: resolvedDefaultAddressId,
+        address: resolvedDefaultAddress,
+      },
+    };
+
+    if (password) {
+      nextAuthPayload.password = password;
+    }
+
+    const { data: updatedAuthData, error: updateError } = await client.auth.updateUser(nextAuthPayload);
+    if (updateError) {
+      throw updateError;
+    }
+
+    const { data: profileData, error: profileError } = await upsertCurrentUserProfile(client, {
+      full_name: resolvedFullName,
+      phone: resolvedPhone,
+    });
+
+    if (profileError) {
+      throw profileError;
+    }
+
+    return {
+      data: {
+        ...buildCustomerSettingsRecord({
+          profile: profileData,
+          user: updatedAuthData?.user || user,
+        }),
+      },
+      error: null,
+    };
+  } catch (error) {
+    console.error('Error updating customer settings:', error);
+    return { data: null, error };
+  }
 }
 
 export async function logout(client) {

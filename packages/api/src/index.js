@@ -5,6 +5,8 @@ export {
   upsertCurrentUserProfile,
   verifyOtpAndSyncProfile,
   completeSignupProfile,
+  fetchCustomerSettings,
+  updateCustomerSettings,
   logout,
 } from './auth.js'
 export {

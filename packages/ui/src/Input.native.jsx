@@ -129,7 +129,8 @@ export function Input({
           autoFocus={autoFocus}
           maxLength={maxLength}
           autoCorrect={false}
-          autoCapitalize={type === 'email' ? 'none' : 'words'}
+          autoCapitalize={type === 'email' || type === 'password' ? 'none' : 'words'}
+          secureTextEntry={type === 'password'}
           style={[styles.input, inputStyleOverride]}
         />
 

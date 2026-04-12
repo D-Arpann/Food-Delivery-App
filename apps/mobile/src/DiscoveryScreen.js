@@ -6,22 +6,31 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import {
   createCheckoutOrder,
   fetchCustomerOrders,
+  fetchCustomerSettings,
   fetchRestaurantFeed,
   logout,
+  updateCustomerSettings,
 } from '@repo/api';
-import { useCart } from '@repo/ui';
+import { Button, Input, useCart } from '@repo/ui';
 import {
   filterMenuItems,
   filterRestaurantFeed,
   formatNpr,
   getDeliveryFee,
+  getDefaultSavedAddress,
   getRestaurantRating,
+  hasMinDigits,
+  isValidDeliveryAddress,
+  normalizeDeliveryAddress,
+  normalizeSavedAddresses,
+  resolveDefaultSavedAddressId,
 } from '@repo/utils';
 
 const TAB_HOME = 'home';
@@ -80,7 +89,7 @@ function SearchBar({ value, onChangeText, placeholder = 'Search', menu = false }
         value={value}
         onChangeText={onChangeText}
         placeholder={placeholder}
-        placeholderTextColor="#8E8882"
+        placeholderTextColor={menu ? '#8E8882' : '#8E8882'}
         style={[styles.searchInput, menu && styles.searchInputMenu]}
       />
     </View>
@@ -249,7 +258,7 @@ function CartItemCard({ item, restaurantName, onIncrease, onDecrease }) {
         <Text style={styles.cartItemName} numberOfLines={1}>{item.name}</Text>
         <View style={styles.cartItemRestaurantChip}>
           <Ionicons name="storefront" size={12} color="#D67D3B" />
-          <Text style={styles.cartItemRestaurantText} numberOfLines={1}>{restaurantName}</Text>
+          <Text style={styles.cartItemRestaurant} numberOfLines={1}>{restaurantName}</Text>
         </View>
         <Text style={styles.cartItemPrice}>{formatNpr(item.price)}</Text>
       </View>
@@ -262,37 +271,66 @@ function CartItemCard({ item, restaurantName, onIncrease, onDecrease }) {
   );
 }
 
-function BottomNav({ activeTab, onChange, bottomInset }) {
+function BottomNav({ activeTab, onChange, bottomInset, cartCount = 0 }) {
   const getTabIcon = (tabKey, active) => {
-    switch (tabKey) {
-      case TAB_HOME:
-        return active ? 'home' : 'home-outline';
-      case TAB_ORDERS:
-        return active ? 'document-text' : 'document-text-outline';
-      case TAB_CART:
-        return active ? 'cart' : 'cart-outline';
-      case TAB_PROFILE:
-      default:
-        return active ? 'person' : 'person-outline';
+    if (tabKey === TAB_HOME) {
+      return (
+        <MaterialCommunityIcons
+          name="home-variant"
+          size={24}
+          color={active ? '#F8964F' : '#5E5E5E'}
+        />
+      );
     }
+
+    if (tabKey === TAB_CART) {
+      return (
+        <MaterialCommunityIcons
+          name="cart"
+          size={23}
+          color={active ? '#F8964F' : '#5E5E5E'}
+        />
+      );
+    }
+
+    if (tabKey === TAB_PROFILE) {
+      return (
+        <MaterialCommunityIcons
+          name="account-circle"
+          size={24}
+          color={active ? '#F8964F' : '#5E5E5E'}
+        />
+      );
+    }
+
+    return (
+      <MaterialCommunityIcons
+        name="clipboard-list"
+        size={23}
+        color={active ? '#F8964F' : '#5E5E5E'}
+      />
+    );
   };
 
   return (
-    <View style={[styles.bottomNav, { paddingBottom: Math.max(bottomInset, 8) }]}> 
+    <View style={[styles.bottomNav, { paddingBottom: Math.max(bottomInset, 8) }]}>
       {tabs.map((tab) => {
         const active = tab.key === activeTab;
+        const isCartTab = tab.key === TAB_CART;
+
         return (
           <Pressable
             key={tab.key}
-            style={[styles.bottomNavItem, active && styles.bottomNavItemActive]}
+            style={styles.bottomNavItem}
             onPress={() => onChange(tab.key)}
           >
             <View style={styles.bottomNavIconWrap}>
-              <Ionicons
-                name={getTabIcon(tab.key, active)}
-                size={22}
-                color={active ? '#FFFFFF' : '#6E6E6E'}
-              />
+              {getTabIcon(tab.key, active)}
+              {isCartTab && cartCount > 0 && (
+                <View style={styles.cartBadge}>
+                  <Text style={styles.cartBadgeText}>{cartCount > 9 ? '9+' : cartCount}</Text>
+                </View>
+              )}
             </View>
           </Pressable>
         );
@@ -460,7 +498,7 @@ function createOptimisticOrderRecord({
     delivery_fee: deliveryFee,
     total_amount: totalAmount,
     status: 'placed',
-    status_label: 'Restaurant received your order',
+    status_label: 'Rider found',
     eta_label: '20 minutes',
     created_at: createdAt,
     food_place: restaurant
@@ -527,7 +565,47 @@ function OrderHistoryCard({ order }) {
   );
 }
 
-export function DiscoveryScreen({ session, supabase, topInset = 0, bottomInset = 0 }) {
+function buildSessionCustomerSettings(session) {
+  const user = session?.user || {};
+  const metadata = user.user_metadata || {};
+  const phone = metadata.phone || user.phone || '';
+  const fullName = metadata.full_name || phone || 'User';
+  const addresses = normalizeSavedAddresses(
+    metadata.saved_addresses,
+    metadata.address || 'Naxal, Kathmandu',
+  );
+  const defaultAddressId = resolveDefaultSavedAddressId(addresses, metadata.default_address_id);
+  const defaultAddress = getDefaultSavedAddress(
+    addresses,
+    defaultAddressId,
+    metadata.address || 'Naxal, Kathmandu',
+  );
+
+  return {
+    id: user.id || null,
+    fullName,
+    phone,
+    email: metadata.email || user.email || '',
+    role: metadata.role || 'customer',
+    addresses,
+    defaultAddressId,
+    defaultAddress,
+  };
+}
+
+export function DiscoveryScreen({
+  session,
+  supabase,
+  topInset = 0,
+  bottomInset = 0,
+  onTemporaryLogout,
+}) {
+  const { height: windowHeight } = useWindowDimensions();
+  const sessionCustomerSettings = useMemo(
+    () => buildSessionCustomerSettings(session),
+    [session],
+  );
+  const initialAddress = sessionCustomerSettings.defaultAddress || 'Naxal, Kathmandu';
   const [feed, setFeed] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -536,18 +614,29 @@ export function DiscoveryScreen({ session, supabase, topInset = 0, bottomInset =
   const [selectedRestaurantId, setSelectedRestaurantId] = useState(null);
   const [menuSelection, setMenuSelection] = useState({ itemId: null, quantity: 0 });
   const [logoutLoading, setLogoutLoading] = useState(false);
-  const [deliveryAddress] = useState('Naxal, Kathmandu');
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [checkoutMessage, setCheckoutMessage] = useState('');
+  const [deliveryAddress, setDeliveryAddress] = useState(initialAddress);
   const [ordersLoading, setOrdersLoading] = useState(false);
   const [ordersError, setOrdersError] = useState('');
   const [remoteOrders, setRemoteOrders] = useState([]);
   const [localOrders, setLocalOrders] = useState([]);
+  const [profileSettings, setProfileSettings] = useState(sessionCustomerSettings);
+  const [profileForm, setProfileForm] = useState({
+    fullName: sessionCustomerSettings.fullName,
+    phone: sessionCustomerSettings.phone,
+    password: '',
+  });
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileMessage, setProfileMessage] = useState('');
+  const [profileError, setProfileError] = useState('');
 
   const {
     restaurant: cartRestaurant,
     items: cartItems,
     notice: cartNotice,
+    itemCount,
     incrementItem,
     decrementItem,
     clearCart,
@@ -601,10 +690,59 @@ export function DiscoveryScreen({ session, supabase, topInset = 0, bottomInset =
   }, [cartNotice, dismissNotice]);
 
   useEffect(() => {
+    setProfileSettings(sessionCustomerSettings);
+    setProfileForm({
+      fullName: sessionCustomerSettings.fullName,
+      phone: sessionCustomerSettings.phone,
+      password: '',
+    });
+    setDeliveryAddress(sessionCustomerSettings.defaultAddress || 'Naxal, Kathmandu');
+  }, [sessionCustomerSettings]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadProfileSettings = async () => {
+      if (session?.isTemporaryAuth || !session?.user?.id) {
+        return;
+      }
+
+      setProfileLoading(true);
+      setProfileError('');
+
+      const { data, error: customerSettingsError } = await fetchCustomerSettings(supabase, session.user.id);
+
+      if (!mounted) {
+        return;
+      }
+
+      if (customerSettingsError) {
+        setProfileError('Could not load your profile settings right now.');
+      } else if (data) {
+        setProfileSettings(data);
+        setProfileForm({
+          fullName: data.fullName || '',
+          phone: data.phone || '',
+          password: '',
+        });
+        setDeliveryAddress(data.defaultAddress || 'Naxal, Kathmandu');
+      }
+
+      setProfileLoading(false);
+    };
+
+    loadProfileSettings();
+
+    return () => {
+      mounted = false;
+    };
+  }, [session?.isTemporaryAuth, session?.user?.id, supabase]);
+
+  useEffect(() => {
     let mounted = true;
 
     const loadOrders = async () => {
-      if (activeTab !== TAB_ORDERS || !session?.user?.id) {
+      if (activeTab !== TAB_ORDERS || session?.isTemporaryAuth || !session?.user?.id) {
         return;
       }
 
@@ -631,10 +769,11 @@ export function DiscoveryScreen({ session, supabase, topInset = 0, bottomInset =
     return () => {
       mounted = false;
     };
-  }, [activeTab, session?.user?.id, supabase]);
+  }, [activeTab, session?.isTemporaryAuth, session?.user?.id, supabase]);
 
-  const userName = session?.user?.user_metadata?.full_name || session?.user?.phone || 'User';
+  const userName = profileSettings.fullName || session?.user?.phone || 'User';
   const firstName = userName.split(' ')[0] || userName;
+  const homeLocationText = (profileSettings.defaultAddress || deliveryAddress || initialAddress || 'Kathmandu').trim();
   const mergedOrders = useMemo(
     () => mergeOrderRecords(localOrders, remoteOrders),
     [localOrders, remoteOrders],
@@ -672,12 +811,10 @@ export function DiscoveryScreen({ session, supabase, topInset = 0, bottomInset =
     () => filterMenuItems(selectedRestaurant?.menu_items || [], searchQuery),
     [selectedRestaurant, searchQuery],
   );
-
   const homeFeaturedRestaurants = useMemo(
     () => filteredRestaurants.slice(0, 2),
     [filteredRestaurants],
   );
-
   const nonFeaturedRestaurants = useMemo(
     () => filteredRestaurants.slice(2),
     [filteredRestaurants],
@@ -687,18 +824,17 @@ export function DiscoveryScreen({ session, supabase, topInset = 0, bottomInset =
     () => selectedMenuItems.slice(0, 2),
     [selectedMenuItems],
   );
-
   const regularMenuItems = useMemo(
     () => selectedMenuItems.slice(2, 6),
     [selectedMenuItems],
   );
-
   const selectedMenuItem = useMemo(
     () => selectedMenuItems.find((item) => item.id === menuSelection.itemId) || null,
     [selectedMenuItems, menuSelection.itemId],
   );
-
-  const selectedMenuQuantity = selectedMenuItem ? menuSelection.quantity : 0;
+  const selectedMenuQuantity = selectedMenuItem
+    ? menuSelection.quantity
+    : 0;
   const canAddFromSelectedRestaurant = !cartRestaurant?.id || cartRestaurant.id === selectedRestaurant?.id;
 
   useEffect(() => {
@@ -763,10 +899,14 @@ export function DiscoveryScreen({ session, supabase, topInset = 0, bottomInset =
     }
 
     setMenuSelection({ itemId: null, quantity: 0 });
-    setCheckoutMessage('');
   };
 
   const handleLogout = async () => {
+    if (session?.isTemporaryAuth) {
+      onTemporaryLogout?.();
+      return;
+    }
+
     setLogoutLoading(true);
     try {
       await logout(supabase);
@@ -775,23 +915,154 @@ export function DiscoveryScreen({ session, supabase, topInset = 0, bottomInset =
     }
   };
 
-  const cartDeliveryFee = cartRestaurant?.id ? getDeliveryFee(cartRestaurant.id) : 0;
-  const cartSummary = getSummary(cartDeliveryFee);
-  const showRestaurantMenu = activeTab === TAB_HOME && selectedRestaurantId && selectedRestaurant;
+  const commitProfileSettings = async (nextSettings, options = {}) => {
+    const { password = '' } = options;
+    const resolvedAddresses = normalizeSavedAddresses(
+      nextSettings.addresses,
+      nextSettings.defaultAddress || deliveryAddress || initialAddress,
+    );
+    const resolvedDefaultAddressId = resolveDefaultSavedAddressId(
+      resolvedAddresses,
+      nextSettings.defaultAddressId,
+    );
+    const resolvedDefaultAddress = getDefaultSavedAddress(
+      resolvedAddresses,
+      resolvedDefaultAddressId,
+      nextSettings.defaultAddress || deliveryAddress || initialAddress,
+    );
+
+    const normalizedSettings = {
+      ...nextSettings,
+      fullName: String(nextSettings.fullName || '').trim(),
+      phone: String(nextSettings.phone || '').trim(),
+      addresses: resolvedAddresses,
+      defaultAddressId: resolvedDefaultAddressId,
+      defaultAddress: resolvedDefaultAddress,
+    };
+
+    if (session?.isTemporaryAuth) {
+      setProfileSettings(normalizedSettings);
+      setDeliveryAddress(resolvedDefaultAddress);
+      return { data: normalizedSettings, error: null, temporary: true };
+    }
+
+    const { data, error: updateError } = await updateCustomerSettings(supabase, {
+      fullName: normalizedSettings.fullName,
+      phone: normalizedSettings.phone,
+      password,
+      addresses: normalizedSettings.addresses,
+      defaultAddressId: normalizedSettings.defaultAddressId,
+    });
+
+    if (updateError) {
+      return { data: null, error: updateError, temporary: false };
+    }
+
+    const updatedSettings = {
+      ...normalizedSettings,
+      ...data,
+    };
+
+    setProfileSettings(updatedSettings);
+    setDeliveryAddress(updatedSettings.defaultAddress || resolvedDefaultAddress);
+
+    return { data: updatedSettings, error: null, temporary: false };
+  };
+
+  const handleSaveProfileDetails = async () => {
+    const nextFullName = String(profileForm.fullName || '').trim();
+    const nextPhone = String(profileForm.phone || '').trim();
+    const nextPassword = String(profileForm.password || '');
+
+    if (!nextFullName) {
+      setProfileError('Enter your full name.');
+      setProfileMessage('');
+      return;
+    }
+
+    if (!hasMinDigits(nextPhone, 6)) {
+      setProfileError('Enter a valid phone number.');
+      setProfileMessage('');
+      return;
+    }
+
+    if (nextPassword && nextPassword.length < 6) {
+      setProfileError('New password should be at least 6 characters.');
+      setProfileMessage('');
+      return;
+    }
+
+    setProfileSaving(true);
+    setProfileError('');
+    setProfileMessage('');
+
+    const { error: saveError, temporary } = await commitProfileSettings(
+      {
+        ...profileSettings,
+        fullName: nextFullName,
+        phone: nextPhone,
+      },
+      { password: nextPassword },
+    );
+
+    if (saveError) {
+      setProfileError(saveError.message || 'Could not save your details right now.');
+    } else {
+      setProfileForm((current) => ({
+        ...current,
+        fullName: nextFullName,
+        phone: nextPhone,
+        password: '',
+      }));
+      setProfileMessage(
+        temporary
+          ? 'Temporary login mode: profile changes are saved only for this session.'
+          : 'Your profile details are up to date.',
+      );
+    }
+
+    setProfileSaving(false);
+  };
 
   const handleCheckout = async () => {
     if (!cartItems.length || !cartRestaurant?.id || checkoutLoading) {
       return;
     }
 
+    if (!isValidDeliveryAddress(deliveryAddress)) {
+      setCheckoutMessage('Please enter a complete delivery address.');
+      return;
+    }
+
     setCheckoutLoading(true);
     setCheckoutMessage('');
 
+    if (session?.isTemporaryAuth) {
+      const summary = getSummary(getDeliveryFee(cartRestaurant.id));
+      const createdAt = new Date().toISOString();
+      const optimisticOrder = createOptimisticOrderRecord({
+        orderId: `temp-${Date.now()}`,
+        restaurant: cartRestaurant,
+        items: cartItems,
+        subtotal: summary.subtotal,
+        deliveryFee: summary.deliveryFee,
+        totalAmount: summary.total,
+        createdAt,
+      });
+      setLocalOrders((current) => mergeOrderRecords([optimisticOrder], current));
+      setCheckoutMessage(`Temporary login mode: simulated order (${summary.itemCount} items).`);
+      clearCart();
+      setActiveTab(TAB_ORDERS);
+      setCheckoutLoading(false);
+      return;
+    }
+
+    const deliveryFee = getDeliveryFee(cartRestaurant.id);
     const { data, error: checkoutError } = await createCheckoutOrder(supabase, {
       customerId: session?.user?.id,
       foodPlaceId: cartRestaurant.id,
       deliveryAddress,
-      deliveryFee: cartDeliveryFee,
+      deliveryFee,
       cartItems,
     });
 
@@ -804,7 +1075,7 @@ export function DiscoveryScreen({ session, supabase, topInset = 0, bottomInset =
         restaurant: cartRestaurant,
         items: cartItems,
         subtotal: data?.subtotal ?? cartSummary.subtotal,
-        deliveryFee: data?.deliveryFee ?? cartDeliveryFee,
+        deliveryFee: data?.deliveryFee ?? deliveryFee,
         totalAmount: data?.totalAmount ?? cartSummary.total,
         createdAt: new Date().toISOString(),
       });
@@ -817,9 +1088,11 @@ export function DiscoveryScreen({ session, supabase, topInset = 0, bottomInset =
     setCheckoutLoading(false);
   };
 
+  const showRestaurantMenu = activeTab === TAB_HOME && selectedRestaurantId && selectedRestaurant;
+
   if (showRestaurantMenu) {
     return (
-      <View style={[styles.screen, styles.menuScreen, { paddingTop: topInset + 28, paddingBottom: bottomInset + 8 }]}> 
+      <View style={[styles.screen, styles.menuScreen, { paddingTop: topInset + 28, paddingBottom: bottomInset + 8 }]}>
         <View style={styles.menuLayout}>
           <View style={[styles.contentFrame, styles.menuMainContent]}>
             <View style={styles.menuTopRow}>
@@ -928,6 +1201,13 @@ export function DiscoveryScreen({ session, supabase, topInset = 0, bottomInset =
     );
   }
 
+  const cartDeliveryFee = cartRestaurant?.id ? getDeliveryFee(cartRestaurant.id) : 0;
+  const cartSummary = getSummary(cartDeliveryFee);
+  const cartViewportMinHeight = Math.max(
+    windowHeight - (topInset + 50) - bottomInset,
+    0,
+  );
+
   return (
     <View style={[
       styles.screen,
@@ -936,7 +1216,7 @@ export function DiscoveryScreen({ session, supabase, topInset = 0, bottomInset =
         paddingTop: activeTab === TAB_CART ? topInset + 50 : topInset + 34,
         paddingBottom: activeTab === TAB_CART ? bottomInset : bottomInset + 10,
       },
-    ]}> 
+    ]}>
       {cartNotice ? (
         <View style={styles.noticeBarFloating}>
           <Text style={styles.noticeText}>{cartNotice}</Text>
@@ -961,7 +1241,7 @@ export function DiscoveryScreen({ session, supabase, topInset = 0, bottomInset =
                     <Text style={styles.homeGreeting}>Hey {firstName}</Text>
                     <View style={styles.homeLocationRow}>
                       <Ionicons name="location" size={13} color="#8C6B56" />
-                      <Text style={styles.homeLocation}>Naxal, Kathmandu</Text>
+                      <Text style={styles.homeLocation}>{homeLocationText}</Text>
                     </View>
                   </View>
                 </View>
@@ -1029,7 +1309,12 @@ export function DiscoveryScreen({ session, supabase, topInset = 0, bottomInset =
             </View>
           </ScrollView>
 
-          <BottomNav activeTab={activeTab} onChange={setActiveTab} bottomInset={bottomInset} />
+          <BottomNav
+            activeTab={activeTab}
+            onChange={setActiveTab}
+            bottomInset={bottomInset}
+            cartCount={itemCount}
+          />
         </>
       )}
 
@@ -1049,7 +1334,7 @@ export function DiscoveryScreen({ session, supabase, topInset = 0, bottomInset =
               </View>
 
               {ordersLoading ? (
-                <Text style={styles.helperText}>Loading order tracker...</Text>
+                <Text style={styles.helperText}>Loading orders...</Text>
               ) : null}
               {!ordersLoading && !!ordersError ? (
                 <Text style={styles.errorText}>{ordersError}</Text>
@@ -1070,7 +1355,12 @@ export function DiscoveryScreen({ session, supabase, topInset = 0, bottomInset =
               ) : null}
             </View>
           </ScrollView>
-          <BottomNav activeTab={activeTab} onChange={setActiveTab} bottomInset={bottomInset} />
+          <BottomNav
+            activeTab={activeTab}
+            onChange={setActiveTab}
+            bottomInset={bottomInset}
+            cartCount={itemCount}
+          />
         </>
       )}
 
@@ -1080,7 +1370,7 @@ export function DiscoveryScreen({ session, supabase, topInset = 0, bottomInset =
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
-          <View style={[styles.contentFrame, styles.cartFrame]}>
+          <View style={[styles.contentFrame, styles.cartFrame, { minHeight: cartViewportMinHeight }]}>
             <View style={styles.cartHeader}>
               <Pressable style={styles.cartHeaderIcon} onPress={() => setActiveTab(TAB_HOME)}>
                 <Ionicons name="arrow-back" size={22} color="#1E1E1E" />
@@ -1181,16 +1471,137 @@ export function DiscoveryScreen({ session, supabase, topInset = 0, bottomInset =
 
       {activeTab === TAB_PROFILE && (
         <>
-          <PlaceholderPane
-            title="Profile Coming Soon"
-            subtitle={logoutLoading ? 'Logging out...' : `Signed in as ${userName}`}
+          <ScrollView
+            contentContainerStyle={styles.profileContent}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
+            <View style={styles.contentFrame}>
+              <View style={styles.profileHeroCard}>
+                <View style={styles.profileHeroAvatar}>
+                  <MaterialCommunityIcons name="cat" size={34} color="#6F7278" />
+                </View>
+
+                <View style={styles.profileHeroText}>
+                  <Text style={styles.profileTitle}>Your Profile</Text>
+                  <Text style={styles.profileSubtitle}>
+                    Keep your name, phone number, and password up to date.
+                  </Text>
+                </View>
+              </View>
+
+              {profileLoading ? (
+                <Text style={styles.helperText}>Loading profile settings...</Text>
+              ) : null}
+
+              {!!profileMessage ? (
+                <View style={styles.profileNoticeSuccess}>
+                  <Ionicons name="checkmark-circle" size={16} color="#2D6A33" />
+                  <Text style={styles.profileNoticeText}>{profileMessage}</Text>
+                </View>
+              ) : null}
+
+              {!!profileError ? (
+                <View style={styles.profileNoticeError}>
+                  <Ionicons name="alert-circle" size={16} color="#D32F2F" />
+                  <Text style={[styles.profileNoticeText, styles.profileNoticeTextError]}>{profileError}</Text>
+                </View>
+              ) : null}
+
+              <View style={styles.profileSummaryCard}>
+                <View style={styles.profileSummaryRow}>
+                  <View style={styles.profileSummaryItem}>
+                    <Ionicons name="person-circle" size={18} color="#F8964F" />
+                    <Text style={styles.profileSummaryValue} numberOfLines={1}>{profileSettings.fullName}</Text>
+                  </View>
+                  <View style={styles.profileSummaryItem}>
+                    <Ionicons name="call" size={16} color="#F8964F" />
+                    <Text style={styles.profileSummaryValue} numberOfLines={1}>{profileSettings.phone || 'No phone saved'}</Text>
+                  </View>
+                </View>
+                <View style={styles.profileSummaryAddress}>
+                  <Ionicons name="location" size={16} color="#8C6B56" />
+                  <Text style={styles.profileSummaryAddressText}>
+                    {profileSettings.defaultAddress || 'No default address selected'}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.profileSectionCard}>
+                <View style={styles.profileSectionHead}>
+                  <Text style={styles.profileSectionTitle}>Personal details</Text>
+                </View>
+
+                <Input
+                  label="Full name"
+                  placeholder="Your full name"
+                  value={profileForm.fullName}
+                  onChangeText={(value) => {
+                    setProfileForm((current) => ({ ...current, fullName: value }));
+                    if (profileError) {
+                      setProfileError('');
+                    }
+                  }}
+                />
+
+                <Input
+                  label="Phone number"
+                  placeholder="98XXXXXXXX"
+                  type="tel"
+                  value={profileForm.phone}
+                  onChangeText={(value) => {
+                    setProfileForm((current) => ({ ...current, phone: value }));
+                    if (profileError) {
+                      setProfileError('');
+                    }
+                  }}
+                />
+
+                <Input
+                  label="New password"
+                  placeholder="At least 6 characters"
+                  type="password"
+                  value={profileForm.password}
+                  onChangeText={(value) => {
+                    setProfileForm((current) => ({ ...current, password: value }));
+                    if (profileError) {
+                      setProfileError('');
+                    }
+                  }}
+                />
+
+                <Button
+                  title="Save details"
+                  onPress={handleSaveProfileDetails}
+                  loading={profileSaving}
+                  style={styles.profileFullButton}
+                />
+              </View>
+
+            </View>
+          </ScrollView>
+          <View style={[styles.profileStickyFooter, { bottom: Math.max(bottomInset, 8) + 96 }]}>
+            <View style={styles.profileStickyFooterInner}>
+              <Button
+                title={logoutLoading ? 'Logging out...' : 'Logout'}
+                onPress={handleLogout}
+                disabled={logoutLoading}
+                style={[styles.profileFullButton, styles.profileDangerButton]}
+              />
+            </View>
+          </View>
+          <BottomNav
+            activeTab={activeTab}
+            onChange={setActiveTab}
+            bottomInset={bottomInset}
+            cartCount={itemCount}
           />
-          <BottomNav activeTab={activeTab} onChange={setActiveTab} bottomInset={bottomInset} />
         </>
       )}
     </View>
   );
 }
+
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
@@ -2525,153 +2936,5 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     paddingTop: 10,
     paddingBottom: 2,
-  },
-  profileSecondaryButton: {
-    flex: 1,
-  },
-  profileAddressList: {
-    gap: 12,
-  },
-  profileAddressCard: {
-    borderRadius: 16,
-    backgroundColor: '#FFF7F1',
-    borderWidth: 1,
-    borderColor: '#F6DECF',
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-    gap: 10,
-  },
-  profileAddressCardActive: {
-    backgroundColor: '#FFEBDD',
-    borderColor: '#F8C49C',
-  },
-  profileAddressCardHead: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  profileAddressCardTitleWrap: {
-    flex: 1,
-    gap: 8,
-  },
-  profileAddressCardTitle: {
-    color: '#1E1E1E',
-    fontFamily: 'Outfit_700Bold',
-    fontSize: 15,
-    lineHeight: 18,
-  },
-  profileDefaultBadge: {
-    alignSelf: 'flex-start',
-    minHeight: 24,
-    paddingHorizontal: 8,
-    borderRadius: 999,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#F6D0B3',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  profileDefaultBadgeText: {
-    color: '#D66018',
-    fontFamily: 'Outfit_700Bold',
-    fontSize: 11,
-    lineHeight: 13,
-  },
-  profileAddressCardActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  profileAddressAction: {
-    width: 32,
-    height: 32,
-    borderRadius: 14,
-    backgroundColor: '#FFFFFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: '#F2DFD2',
-  },
-  profileAddressLine: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
-  },
-  profileAddressText: {
-    flex: 1,
-    color: '#5E5E5E',
-    fontFamily: 'Outfit_500Medium',
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  profileAddressFormCard: {
-    borderRadius: 16,
-    backgroundColor: '#FFF7F1',
-    borderWidth: 1,
-    borderColor: '#F6DECF',
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-    gap: 12,
-  },
-  profileAddressFormHead: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 10,
-  },
-  profileAddressFormTitle: {
-    color: '#1E1E1E',
-    fontFamily: 'Outfit_700Bold',
-    fontSize: 15,
-    lineHeight: 18,
-  },
-  profileAddressReset: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#F2DFD2',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  profileTextareaLabel: {
-    color: '#333232',
-    fontFamily: 'Outfit_600SemiBold',
-    fontSize: 15,
-    lineHeight: 18,
-    paddingLeft: 2,
-  },
-  profileTextareaField: {
-    minHeight: 98,
-    borderRadius: 15,
-    backgroundColor: '#F4E5D8',
-    borderWidth: 2,
-    borderColor: '#E7D8CA',
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  profileTextareaInput: {
-    flex: 1,
-    color: '#1E1E1E',
-    fontSize: 15,
-    fontFamily: 'Outfit_500Medium',
-    lineHeight: 21,
-  },
-  profileInlineError: {
-    color: '#D32F2F',
-    fontFamily: 'Outfit_500Medium',
-    fontSize: 13,
-    lineHeight: 16,
-  },
-  profileAddressButtonRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  profileAddressSaveButton: {
-    flex: 1,
   },
 });
