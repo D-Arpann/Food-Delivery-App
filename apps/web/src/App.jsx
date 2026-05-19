@@ -46,10 +46,21 @@ export default function App() {
     });
 
     const { data } = supabase.auth.onAuthStateChange((event, nextSession) => {
-      if (event === 'USER_UPDATED' && roleResolvedRef.current) {
-        // Profile saves update auth metadata. Keep local page state in place;
-        // profile components already patch their own visible data.
-        return;
+      if (roleResolvedRef.current) {
+        // Once the user's role is resolved, ignore events that don't change
+        // the authenticated identity.  TOKEN_REFRESHED fires every time the
+        // browser tab regains focus; USER_UPDATED fires on profile-metadata
+        // saves.  Neither should restart the role-resolution flow.
+        if (event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
+          // Still keep the session reference up-to-date (for fresh tokens)
+          // but use a functional update so React can bail out when the user
+          // id hasn't actually changed.
+          setSession((prev) => {
+            if (prev?.user?.id === nextSession?.user?.id) return prev;
+            return nextSession || null;
+          });
+          return;
+        }
       }
 
       setSession(nextSession || null);
@@ -60,6 +71,10 @@ export default function App() {
       data.subscription.unsubscribe();
     };
   }, []);
+
+  // Derive a stable key so the effect only re-runs when the actual user
+  // changes, not on every token refresh (which creates a new object ref).
+  const sessionUserId = session?.user?.id ?? null;
 
   useEffect(() => {
     if (!session?.user?.id) {
@@ -206,7 +221,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [screen, session]);
+  }, [screen, sessionUserId]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleLogout = async () => {
     await logout(supabase);
