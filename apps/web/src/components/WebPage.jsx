@@ -56,12 +56,19 @@ const steps = [
   },
 ]
 
-export default function WebPage({ supabase, onOpenLogin, onOpenRestaurantSignup }) {
+export default function WebPage({
+  supabase,
+  isAuthenticated = false,
+  onContinueToApp,
+  onOpenLogin,
+  onOpenRestaurantSignup,
+}) {
   const [scrolled, setScrolled] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [sent, setSent] = useState(false)
   const [contactLoading, setContactLoading] = useState(false)
   const [contactError, setContactError] = useState('')
+  const handlePrimaryAction = isAuthenticated ? onContinueToApp : onOpenLogin
 
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 40)
@@ -178,8 +185,8 @@ export default function WebPage({ supabase, onOpenLogin, onOpenRestaurantSignup 
             >
               For Restaurants
             </button>
-            <button className="btn btn-get-started nav-btn" onClick={onOpenLogin}>
-              Login
+            <button className="btn btn-get-started nav-btn" onClick={handlePrimaryAction}>
+              {isAuthenticated ? 'Open App' : 'Login'}
             </button>
             <button
               className={`nav-toggle ${menuOpen ? 'active' : ''}`}
@@ -231,8 +238,8 @@ export default function WebPage({ supabase, onOpenLogin, onOpenRestaurantSignup 
 
             <div className="hero-actions">
               <div className="hero-primary-actions">
-                <button className="btn btn-primary" onClick={onOpenLogin}>
-                  Get Started
+                <button className="btn btn-primary" onClick={handlePrimaryAction}>
+                  {isAuthenticated ? 'Open App' : 'Get Started'}
                 </button>
                 <button className="btn btn-outline" onClick={onOpenRestaurantSignup}>
                   Register Your Restaurant
