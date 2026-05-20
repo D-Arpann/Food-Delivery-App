@@ -32,6 +32,43 @@ export default function App() {
   const [loginReturnScreen, setLoginReturnScreen] = useState(SCREEN.LANDING);
   const [accessMessage, setAccessMessage] = useState('');
   const roleResolvedRef = useRef(false);
+  const screenHistoryRef = useRef([]);
+
+  const navigateToScreen = useCallback((nextScreen, options = {}) => {
+    const { replace = false, resetHistory = false } = options;
+
+    setScreen((currentScreen) => {
+      if (resetHistory) {
+        screenHistoryRef.current = [];
+      }
+
+      if (currentScreen === nextScreen) {
+        return currentScreen;
+      }
+
+      if (!replace && !resetHistory) {
+        screenHistoryRef.current = [...screenHistoryRef.current, currentScreen].slice(-8);
+      }
+
+      return nextScreen;
+    });
+  }, []);
+
+  const handleGoBack = useCallback(() => {
+    setAccessMessage('');
+    setScreen((currentScreen) => {
+      const history = screenHistoryRef.current;
+      const previousScreen = history[history.length - 1];
+
+      screenHistoryRef.current = history.slice(0, -1);
+
+      if (previousScreen && previousScreen !== currentScreen) {
+        return previousScreen;
+      }
+
+      return SCREEN.LANDING;
+    });
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -227,27 +264,23 @@ export default function App() {
     await logout(supabase);
     setSession(null);
     setAccountRole(null);
-    setScreen(SCREEN.LANDING);
+    navigateToScreen(SCREEN.LANDING, { resetHistory: true });
   };
 
   const handleOpenRestaurantSignup = () => {
-    setScreen(SCREEN.RESTAURANT_SIGNUP);
-  };
-
-  const handleOpenLanding = () => {
-    setScreen(SCREEN.LANDING);
+    navigateToScreen(SCREEN.RESTAURANT_SIGNUP);
   };
 
   const handleOpenLogin = (returnScreen = screen) => {
     setLoginReturnScreen(returnScreen);
     setAccessMessage('');
-    setScreen(SCREEN.LOGIN);
+    navigateToScreen(SCREEN.LOGIN);
   };
 
   const handleRestaurantApplicationVerified = useCallback(() => {
     setAccountRole(USER_ROLES.RESTAURANT_OWNER);
-    setScreen(SCREEN.LANDING);
-  }, []);
+    navigateToScreen(SCREEN.LANDING, { resetHistory: true });
+  }, [navigateToScreen]);
 
   if (booting) {
     return (
@@ -267,7 +300,7 @@ export default function App() {
           <RestaurantSignupPage
             supabase={supabase}
             session={session}
-            onBack={handleOpenLanding}
+            onBack={handleGoBack}
             onAuthenticated={setSession}
             onApplicationVerified={handleRestaurantApplicationVerified}
           />
@@ -275,11 +308,12 @@ export default function App() {
           <LoginPage
             supabase={supabase}
             notice={accessMessage}
-            onBack={handleOpenLanding}
+            onBack={handleGoBack}
             onOpenRestaurantSignup={handleOpenRestaurantSignup}
             onAuthenticated={(nextSession) => {
               setAccessMessage('');
               setSession(nextSession);
+              screenHistoryRef.current = [];
               setScreen(loginReturnScreen || SCREEN.LANDING);
               setLoginReturnScreen(SCREEN.LANDING);
             }}

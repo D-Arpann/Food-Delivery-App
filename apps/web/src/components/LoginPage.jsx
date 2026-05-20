@@ -176,7 +176,7 @@ export default function LoginPage({ supabase, notice = '', onAuthenticated, onBa
           </button>
 
           <button type="button" className="btn btn-outline login-home-button" onClick={handleNavigateAway}>
-            Back to Home
+            Back
           </button>
         </div>
       </nav>

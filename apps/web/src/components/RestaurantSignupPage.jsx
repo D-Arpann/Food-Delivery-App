@@ -546,7 +546,7 @@ export default function RestaurantSignupPage({
           <div className="restaurant-signup-nav-actions">
             <button type="button" className="btn btn-outline" onClick={onBack}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16" aria-hidden="true" style={{display:'inline',verticalAlign:'middle',marginRight:'4px'}}><path d="M15 18l-6-6 6-6" /></svg>
-              Back to Home
+              Back
             </button>
           </div>
         </div>
