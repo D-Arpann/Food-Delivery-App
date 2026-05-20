@@ -212,7 +212,7 @@
   margin-top: var(--navbar-height);
   display: grid;
   grid-template-columns: 1.2fr 1fr;
-  align-items: flex-start;
+  align-items: center;
   gap: clamp(32px, 6vw, 64px);
   padding-top: 24px;
   padding-bottom: 40px;
