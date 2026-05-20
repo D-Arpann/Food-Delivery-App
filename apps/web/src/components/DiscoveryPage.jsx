@@ -2285,6 +2285,117 @@ export default function DiscoveryPage({ session, supabase, onLogout }) {
                     <strong>{getShortAddress(profileSettings.defaultAddress) || 'Not available'}</strong>
                   </div>
                 </div>
+
+                <div className="discover-rider-entry">
+                  {!showRiderApplicationForm ? (
+                    <>
+                      {riderApplicationPending ? (
+                        <p className="discover-profile-alert" data-state="success">
+                          Your rider application is waiting for admin verification.
+                        </p>
+                      ) : null}
+
+                      {riderApplicationVerified ? (
+                        <p className="discover-profile-alert" data-state="success">
+                          Rider accounts should use the mobile app for delivery work.
+                        </p>
+                      ) : null}
+
+                      <button
+                        type="button"
+                        className="discover-profile-save discover-rider-entry-button"
+                        onClick={() => setShowRiderApplicationForm(true)}
+                        disabled={riderApplicationPending || riderApplicationVerified}
+                      >
+                        {riderApplicationRejected ? 'Update rider application' : 'Ride with us'}
+                      </button>
+                    </>
+                  ) : (
+                    <div className="discover-rider-card">
+                      <div className="discover-profile-form-head">
+                        <div>
+                          <h3>Ride with us</h3>
+                          <p>Apply using your saved name and phone number.</p>
+                        </div>
+                        <button
+                          type="button"
+                          className="discover-rider-close"
+                          onClick={() => setShowRiderApplicationForm(false)}
+                          aria-label="Close rider application form"
+                        >
+                          x
+                        </button>
+                      </div>
+
+                      {riderApplicationRejected ? (
+                        <p className="discover-profile-alert" data-state="error">
+                          {profileSettings.rejectionReason || 'Your rider application was rejected. Update the details and submit again.'}
+                        </p>
+                      ) : null}
+
+                      <div className="discover-rider-fields">
+                        <label className="discover-rider-select">
+                          <span>Vehicle type</span>
+                          <select
+                            value={riderVehicleType}
+                            onChange={(event) => handleRiderFieldChange('vehicleType')(event.target.value)}
+                          >
+                            <option value="bicycle">Bicycle</option>
+                            <option value="motorbike">Motorbike</option>
+                            <option value="scooter">Scooter</option>
+                          </select>
+                        </label>
+
+                        {riderNeedsLicenseDetails ? (
+                          <>
+                            <Input
+                              label="Model"
+                              placeholder="Honda Dio"
+                              value={riderForm.bikeModel}
+                              onChangeText={handleRiderFieldChange('bikeModel')}
+                            />
+
+                            <Input
+                              label="Condition"
+                              placeholder="Good, serviced recently"
+                              value={riderForm.bikeCondition}
+                              onChangeText={handleRiderFieldChange('bikeCondition')}
+                            />
+
+                            <div className="discover-rider-upload-grid">
+                              <label className={`discover-rider-upload ${riderLicensePreviews.licenseFrontFile ? 'has-preview' : ''}`}>
+                                <input type="file" accept="image/*" onChange={handleRiderFileChange('licenseFrontFile')} />
+                                {riderLicensePreviews.licenseFrontFile ? (
+                                  <img src={riderLicensePreviews.licenseFrontFile} alt="" />
+                                ) : null}
+                                <span>License front</span>
+                                <strong>{riderLicensePreviews.licenseFrontFile ? 'Selected' : 'Tap to choose photo'}</strong>
+                              </label>
+
+                              <label className={`discover-rider-upload ${riderLicensePreviews.licenseBackFile ? 'has-preview' : ''}`}>
+                                <input type="file" accept="image/*" onChange={handleRiderFileChange('licenseBackFile')} />
+                                {riderLicensePreviews.licenseBackFile ? (
+                                  <img src={riderLicensePreviews.licenseBackFile} alt="" />
+                                ) : null}
+                                <span>License back</span>
+                                <strong>{riderLicensePreviews.licenseBackFile ? 'Selected' : 'Tap to choose photo'}</strong>
+                              </label>
+                            </div>
+                          </>
+                        ) : null}
+
+                        <button
+                          type="button"
+                          className="discover-profile-save"
+                          onClick={handleSubmitRiderApplication}
+                          disabled={riderSubmitting}
+                        >
+                          {riderSubmitting ? 'Submitting application...' : riderApplicationRejected ? 'Resubmit application' : 'Apply to ride'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </aside>
 
               <section className="discover-profile-form-card">
@@ -2462,116 +2573,6 @@ export default function DiscoveryPage({ session, supabase, onLogout }) {
                   </div>
                 </div>
 
-                <div className="discover-rider-entry">
-                  {!showRiderApplicationForm ? (
-                    <>
-                      {riderApplicationPending ? (
-                        <p className="discover-profile-alert" data-state="success">
-                          Your rider application is waiting for admin verification.
-                        </p>
-                      ) : null}
-
-                      {riderApplicationVerified ? (
-                        <p className="discover-profile-alert" data-state="success">
-                          Rider accounts should use the mobile app for delivery work.
-                        </p>
-                      ) : null}
-
-                      <button
-                        type="button"
-                        className="discover-profile-save discover-rider-entry-button"
-                        onClick={() => setShowRiderApplicationForm(true)}
-                        disabled={riderApplicationPending || riderApplicationVerified}
-                      >
-                        {riderApplicationRejected ? 'Update rider application' : 'Ride with us'}
-                      </button>
-                    </>
-                  ) : (
-                    <div className="discover-rider-card">
-                      <div className="discover-profile-form-head">
-                        <div>
-                          <h3>Ride with us</h3>
-                          <p>Apply using your saved name and phone number.</p>
-                        </div>
-                        <button
-                          type="button"
-                          className="discover-rider-close"
-                          onClick={() => setShowRiderApplicationForm(false)}
-                          aria-label="Close rider application form"
-                        >
-                          x
-                        </button>
-                      </div>
-
-                      {riderApplicationRejected ? (
-                        <p className="discover-profile-alert" data-state="error">
-                          {profileSettings.rejectionReason || 'Your rider application was rejected. Update the details and submit again.'}
-                        </p>
-                      ) : null}
-
-                      <div className="discover-rider-fields">
-                        <label className="discover-rider-select">
-                          <span>Vehicle type</span>
-                          <select
-                            value={riderVehicleType}
-                            onChange={(event) => handleRiderFieldChange('vehicleType')(event.target.value)}
-                          >
-                            <option value="bicycle">Bicycle</option>
-                            <option value="motorbike">Motorbike</option>
-                            <option value="scooter">Scooter</option>
-                          </select>
-                        </label>
-
-                        {riderNeedsLicenseDetails ? (
-                          <>
-                            <Input
-                              label="Model"
-                              placeholder="Honda Dio"
-                              value={riderForm.bikeModel}
-                              onChangeText={handleRiderFieldChange('bikeModel')}
-                            />
-
-                            <Input
-                              label="Condition"
-                              placeholder="Good, serviced recently"
-                              value={riderForm.bikeCondition}
-                              onChangeText={handleRiderFieldChange('bikeCondition')}
-                            />
-
-                            <div className="discover-rider-upload-grid">
-                              <label className={`discover-rider-upload ${riderLicensePreviews.licenseFrontFile ? 'has-preview' : ''}`}>
-                                <input type="file" accept="image/*" onChange={handleRiderFileChange('licenseFrontFile')} />
-                                {riderLicensePreviews.licenseFrontFile ? (
-                                  <img src={riderLicensePreviews.licenseFrontFile} alt="" />
-                                ) : null}
-                                <span>License front</span>
-                                <strong>{riderLicensePreviews.licenseFrontFile ? 'Selected' : 'Tap to choose photo'}</strong>
-                              </label>
-
-                              <label className={`discover-rider-upload ${riderLicensePreviews.licenseBackFile ? 'has-preview' : ''}`}>
-                                <input type="file" accept="image/*" onChange={handleRiderFileChange('licenseBackFile')} />
-                                {riderLicensePreviews.licenseBackFile ? (
-                                  <img src={riderLicensePreviews.licenseBackFile} alt="" />
-                                ) : null}
-                                <span>License back</span>
-                                <strong>{riderLicensePreviews.licenseBackFile ? 'Selected' : 'Tap to choose photo'}</strong>
-                              </label>
-                            </div>
-                          </>
-                        ) : null}
-
-                        <button
-                          type="button"
-                          className="discover-profile-save"
-                          onClick={handleSubmitRiderApplication}
-                          disabled={riderSubmitting}
-                        >
-                          {riderSubmitting ? 'Submitting application...' : riderApplicationRejected ? 'Resubmit application' : 'Apply to ride'}
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
               </section>
             </div>
           </section>
