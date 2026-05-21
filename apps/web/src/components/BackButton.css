@@ -48,6 +48,17 @@
   min-height: 46px;
   padding: 0;
   border-radius: 10px;
+  border: none;
+  background: transparent;
+  color: #3f424a;
+  box-shadow: none;
+  gap: 0;
+}
+
+.app-back-button-icon svg {
+  width: 20px;
+  height: 20px;
+  transform: translateX(-1px);
 }
 
 .app-back-button-icon span {
@@ -60,6 +71,13 @@
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+}
+
+.app-back-button-icon:hover:not(:disabled) {
+  border-color: transparent;
+  background: #fff8f2;
+  color: #ff5b00;
+  transform: none;
 }
 
 .app-back-button-plain {

@@ -100,10 +100,6 @@
   font-size: 0.88rem;
 }
 
-.landing-back-button {
-  min-height: 40px;
-}
-
 .nav-toggle {
   display: none;
   flex-direction: column;

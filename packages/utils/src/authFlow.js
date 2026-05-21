@@ -11,7 +11,7 @@ export const AUTH_COPY = {
     cta: 'Get started',
   },
   phone: {
-    title: 'Welcome back',
+    title: 'Sign in',
     subtitle: 'Enter your phone number to continue.',
     action: 'Continue',
     alternate: 'Other login method',

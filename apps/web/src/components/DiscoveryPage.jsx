@@ -1941,13 +1941,15 @@ export default function DiscoveryPage({ session, supabase, onBack, onLogout }) {
           </button>
 
           <div className="discover-nav-actions">
-            <BackButton
-              variant="icon"
-              className="discover-back-button"
-              onClick={handleDiscoveryBack}
-              aria-label="Back"
-              title="Back"
-            />
+            {screen !== 'browse' ? (
+              <BackButton
+                variant="icon"
+                className="discover-back-button"
+                onClick={handleDiscoveryBack}
+                aria-label="Back"
+                title="Back"
+              />
+            ) : null}
             <button
               type="button"
               className={`discover-main-btn ${screen === 'browse' ? 'is-active' : ''}`}
@@ -2883,11 +2885,6 @@ export default function DiscoveryPage({ session, supabase, onBack, onLogout }) {
           </section>
         ) : (
           <section className="discover-workbench">
-            <header className="discover-workbench-head">
-              <strong>Menu</strong>
-              <span>{activeRestaurant ? `${activeRestaurant.menuItems?.length || 0} items available` : 'No restaurant selected'}</span>
-            </header>
-
             {!activeRestaurant ? (
               <div className="discover-empty">
                 <h3>Select a restaurant</h3>

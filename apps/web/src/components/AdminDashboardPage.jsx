@@ -13,7 +13,6 @@ import {
 } from '@repo/api';
 import { Logo } from '@repo/ui';
 import { formatNpr, getShortAddress, USER_ROLES } from '@repo/utils';
-import BackButton from './BackButton';
 import './AdminDashboardPage.css';
 import useHistoryNavigation from '../hooks/useHistoryNavigation';
 
@@ -317,10 +316,7 @@ export default function AdminDashboardPage({ session, supabase, onBack, onLogout
   const [contactLoading, setContactLoading] = useState(false);
   const [userSearch, setUserSearch] = useState('');
 
-  const {
-    goBack: handleAdminBack,
-    navigate: navigateAdminTab,
-  } = useHistoryNavigation({
+  const { navigate: navigateAdminTab } = useHistoryNavigation({
     value: activeTab,
     onChange: setActiveTab,
     stateKey: ADMIN_DASHBOARD_HISTORY_KEY,
@@ -571,7 +567,6 @@ export default function AdminDashboardPage({ session, supabase, onBack, onLogout
           </button>
 
           <div className="admin-dashboard-nav-actions">
-            <BackButton onClick={handleAdminBack} />
             <button type="button" className="admin-dashboard-logout" onClick={onLogout}>Logout</button>
           </div>
         </div>

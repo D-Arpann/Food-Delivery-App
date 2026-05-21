@@ -636,6 +636,10 @@
   border-bottom: 1px solid var(--border, #ececec);
 }
 
+.discover-menu-head {
+  margin-top: 26px;
+}
+
 .discover-subhead {
   margin-top: 24px;
 }

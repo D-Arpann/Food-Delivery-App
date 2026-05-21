@@ -12,7 +12,7 @@ import './LoginPage.css'
 const LOGIN_COPY = {
   phone: {
     kicker: 'Secure login',
-    title: 'Welcome back',
+    title: 'Sign in',
     subtitle: 'Enter your phone number to continue ordering, manage your account, or register a restaurant.',
     action: 'Continue',
     helper: 'No password needed — we\'ll send you a one-time code.',
