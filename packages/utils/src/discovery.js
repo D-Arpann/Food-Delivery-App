@@ -33,6 +33,22 @@ export function filterMenuItems(menuItems = [], query = '') {
   });
 }
 
+export function getSearchResultSections(restaurants = [], query = '') {
+  const foodItems = restaurants.flatMap((restaurant) => (
+    filterMenuItems(restaurant?.menuItems || [], query).map((item) => ({
+      ...item,
+      restaurant,
+      restaurantId: restaurant?.id,
+      restaurantName: restaurant?.name,
+    }))
+  ));
+
+  return {
+    foodItems,
+    restaurants: filterRestaurantFeed(restaurants, query),
+  };
+}
+
 export function filterRestaurantFeed(restaurants = [], query = '') {
   const terms = tokenize(query);
 

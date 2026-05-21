@@ -19,13 +19,13 @@ import {
 import { Input, Logo, useCart } from '@repo/ui';
 import {
   filterMenuItems,
-  filterRestaurantFeed,
   formatNpr,
   getDefaultSavedAddress,
   getDeliveryFee,
   getRestaurantBannerUrl,
   getRestaurantProfileImageUrl,
   getRestaurantRating,
+  getSearchResultSections,
   getShortAddress,
   getCurrentOrders,
   getPastOrders,
@@ -412,6 +412,45 @@ function RestaurantCard({
         aria-label={isFavorite ? `Remove ${restaurant.name} from favorites` : `Add ${restaurant.name} to favorites`}
       >
         <IconHeart />
+      </button>
+    </article>
+  );
+}
+
+function getMenuItemImageUrl(item = {}) {
+  return item?.image_url || item?.imageUrl || item?.photo_url || item?.photoUrl || '';
+}
+
+function SearchFoodItemCard({ item, onSelectRestaurant }) {
+  const imageUrl = getMenuItemImageUrl(item);
+  const restaurantName = item.restaurantName || item.restaurant?.name || 'Restaurant';
+  const description = item.description || normalizeMenuCategory(item.category || 'Specials');
+
+  return (
+    <article className="discover-food-result-card">
+      <button
+        type="button"
+        className="discover-food-result-main"
+        onClick={() => onSelectRestaurant(item.restaurantId)}
+      >
+        {imageUrl ? (
+          <img className="discover-food-result-image" src={imageUrl} alt={item.name} />
+        ) : (
+          <span className="discover-food-result-placeholder" aria-hidden="true">
+            <IconMenu />
+          </span>
+        )}
+
+        <span className="discover-food-result-copy">
+          <span>{restaurantName}</span>
+          <h3>{item.name}</h3>
+          <p>{description}</p>
+        </span>
+
+        <strong className="discover-food-result-price">
+          <IconRupee />
+          {formatNpr(item.price)}
+        </strong>
       </button>
     </article>
   );
@@ -1097,10 +1136,13 @@ export default function DiscoveryPage({ session, supabase, onBack, onLogout }) {
     });
   }, [isTemporaryAuth, session?.user?.id, supabase]);
 
-  const filteredRestaurants = useMemo(
-    () => filterRestaurantFeed(feed, searchQuery),
+  const searchResults = useMemo(
+    () => getSearchResultSections(feed, searchQuery),
     [feed, searchQuery],
   );
+
+  const filteredRestaurants = searchResults.restaurants;
+  const filteredFoodItems = searchResults.foodItems;
   const visibleQuickCategories = useMemo(
     () => (showAllQuickCategories ? QUICK_CATEGORIES : QUICK_CATEGORIES.slice(0, 5)),
     [showAllQuickCategories],
@@ -2156,7 +2198,7 @@ export default function DiscoveryPage({ session, supabase, onBack, onLogout }) {
                 <h2>Find exactly what you want</h2>
                 <p>Search restaurants, menu items, cuisines, or delivery areas.</p>
               </div>
-              <strong>{filteredRestaurants.length} matches</strong>
+              <strong>{filteredFoodItems.length + filteredRestaurants.length} matches</strong>
             </header>
 
             <div className="discover-advanced-search-panel">
@@ -2183,7 +2225,7 @@ export default function DiscoveryPage({ session, supabase, onBack, onLogout }) {
 
             {loading && <p className="discover-note">Loading restaurants...</p>}
             {!loading && error && <p className="discover-error">{error}</p>}
-            {!loading && !error && !filteredRestaurants.length ? (
+            {!loading && !error && !filteredFoodItems.length && !filteredRestaurants.length ? (
               <div className="discover-empty">
                 <IconEmptySearch />
                 <h3>No matches found</h3>
@@ -2192,19 +2234,53 @@ export default function DiscoveryPage({ session, supabase, onBack, onLogout }) {
               </div>
             ) : null}
 
-            {!loading && !error && filteredRestaurants.length ? (
-              <div className="discover-all-grid discover-search-results-grid">
-                {filteredRestaurants.map((restaurant) => (
-                  <RestaurantCard
-                    key={restaurant.id}
-                    restaurant={restaurant}
-                    compact
-                    active={restaurant.id === resolvedActiveRestaurantId}
-                    isFavorite={favoriteRestaurantIdSet.has(restaurant.id)}
-                    onSelect={handleOpenRestaurant}
-                    onToggleFavorite={handleToggleFavoriteRestaurant}
-                  />
-                ))}
+            {!loading && !error && (filteredFoodItems.length || filteredRestaurants.length) ? (
+              <div className="discover-search-sections">
+                <section className="discover-search-section" aria-labelledby="discover-food-items-heading">
+                  <div className="discover-search-section-head">
+                    <h3 id="discover-food-items-heading">Food Items</h3>
+                    <span>{filteredFoodItems.length} results</span>
+                  </div>
+
+                  {filteredFoodItems.length ? (
+                    <div className="discover-food-results-grid">
+                      {filteredFoodItems.map((item) => (
+                        <SearchFoodItemCard
+                          key={`${item.restaurantId}-${item.id}`}
+                          item={item}
+                          onSelectRestaurant={handleOpenRestaurant}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="discover-section-empty">No items found.</p>
+                  )}
+                </section>
+
+                <section className="discover-search-section" aria-labelledby="discover-restaurants-heading">
+                  <div className="discover-search-section-head">
+                    <h3 id="discover-restaurants-heading">Restaurants</h3>
+                    <span>{filteredRestaurants.length} results</span>
+                  </div>
+
+                  {filteredRestaurants.length ? (
+                    <div className="discover-all-grid discover-search-results-grid">
+                      {filteredRestaurants.map((restaurant) => (
+                        <RestaurantCard
+                          key={restaurant.id}
+                          restaurant={restaurant}
+                          compact
+                          active={restaurant.id === resolvedActiveRestaurantId}
+                          isFavorite={favoriteRestaurantIdSet.has(restaurant.id)}
+                          onSelect={handleOpenRestaurant}
+                          onToggleFavorite={handleToggleFavoriteRestaurant}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="discover-section-empty">No restaurants found.</p>
+                  )}
+                </section>
               </div>
             ) : null}
           </section>
