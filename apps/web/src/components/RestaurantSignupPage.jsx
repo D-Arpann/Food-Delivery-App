@@ -10,6 +10,7 @@ import {
 } from '@repo/api'
 import { Button, Input, Logo } from '@repo/ui'
 import { AUTH_OTP_LENGTH, getShortAddress, onlyDigits, toNepalE164Phone } from '@repo/utils'
+import BackButton from './BackButton'
 import './RestaurantSignupPage.css'
 import GoogleAddressPicker from './GoogleAddressPicker'
 
@@ -544,10 +545,7 @@ export default function RestaurantSignupPage({
           </button>
 
           <div className="restaurant-signup-nav-actions">
-            <button type="button" className="btn btn-outline" onClick={onBack}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16" aria-hidden="true" style={{display:'inline',verticalAlign:'middle',marginRight:'4px'}}><path d="M15 18l-6-6 6-6" /></svg>
-              Back
-            </button>
+            <BackButton onClick={onBack} />
           </div>
         </div>
       </nav>

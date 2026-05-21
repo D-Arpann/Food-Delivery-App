@@ -8,6 +8,8 @@ import DiscoveryPage from './components/DiscoveryPage';
 import RestaurantSignupPage from './components/RestaurantSignupPage';
 import RestaurantDashboardPage from './components/RestaurantDashboardPage';
 import AdminDashboardPage from './components/AdminDashboardPage';
+import BackButton from './components/BackButton';
+import useHistoryNavigation from './hooks/useHistoryNavigation';
 
 const supabase = createAppClient({
   supabaseUrl:
@@ -24,6 +26,12 @@ const SCREEN = {
   RESTAURANT_SIGNUP: 'restaurant-signup',
 };
 
+const APP_SCREEN_HISTORY_KEY = 'chito-mitho-app-screen';
+
+function isAppScreen(value) {
+  return Object.values(SCREEN).includes(value);
+}
+
 function getScreenLabel(screen) {
   if (screen === SCREEN.RESTAURANT_SIGNUP) {
     return 'restaurant registration';
@@ -32,12 +40,13 @@ function getScreenLabel(screen) {
   return 'the previous screen';
 }
 
-function PostLoginTransition({ returnScreen, onContinue, onReturn }) {
+function PostLoginTransition({ returnScreen, onBack, onContinue, onReturn }) {
   const returnLabel = getScreenLabel(returnScreen);
 
   return (
     <main className="post-login-shell">
       <section className="post-login-panel" aria-label="Signed in">
+        <BackButton className="post-login-back" onClick={onBack} />
         <div className="post-login-mark" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4">
             <path d="M20 6 9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />
@@ -74,43 +83,37 @@ export default function App() {
   const [showPublicAfterLogin, setShowPublicAfterLogin] = useState(false);
   const [accessMessage, setAccessMessage] = useState('');
   const roleResolvedRef = useRef(false);
-  const screenHistoryRef = useRef([]);
 
-  const navigateToScreen = useCallback((nextScreen, options = {}) => {
-    const { replace = false, resetHistory = false } = options;
-
-    setScreen((currentScreen) => {
-      if (resetHistory) {
-        screenHistoryRef.current = [];
-      }
-
-      if (currentScreen === nextScreen) {
-        return currentScreen;
-      }
-
-      if (!replace && !resetHistory) {
-        screenHistoryRef.current = [...screenHistoryRef.current, currentScreen].slice(-8);
-      }
-
-      return nextScreen;
-    });
-  }, []);
-
-  const handleGoBack = useCallback(() => {
+  const handleScreenChange = useCallback((nextScreen) => {
     setAccessMessage('');
-    setScreen((currentScreen) => {
-      const history = screenHistoryRef.current;
-      const previousScreen = history[history.length - 1];
-
-      screenHistoryRef.current = history.slice(0, -1);
-
-      if (previousScreen && previousScreen !== currentScreen) {
-        return previousScreen;
-      }
-
-      return SCREEN.LANDING;
-    });
+    setScreen(nextScreen);
   }, []);
+
+  const handleScreenHistoryNavigate = useCallback((nextScreen, { source } = {}) => {
+    if (source === 'popstate' && session?.user?.id && (
+      nextScreen === SCREEN.LANDING ||
+      nextScreen === SCREEN.RESTAURANT_SIGNUP
+    )) {
+      setShowPublicAfterLogin(true);
+    }
+  }, [session?.user?.id]);
+
+  const {
+    goBack: handleGoBack,
+    navigate: navigateToScreen,
+  } = useHistoryNavigation({
+    value: screen,
+    onChange: handleScreenChange,
+    stateKey: APP_SCREEN_HISTORY_KEY,
+    fallbackValue: SCREEN.LANDING,
+    isValidValue: isAppScreen,
+    onNavigate: handleScreenHistoryNavigate,
+  });
+
+  const handlePostLoginBack = useCallback(() => {
+    setShowPublicAfterLogin(true);
+    handleGoBack();
+  }, [handleGoBack]);
 
   useEffect(() => {
     let active = true;
@@ -324,18 +327,16 @@ export default function App() {
   };
 
   const handleContinueToApp = useCallback(() => {
-    screenHistoryRef.current = [];
     setShowPublicAfterLogin(false);
     setPostLoginReturnScreen(SCREEN.LANDING);
-    setScreen(SCREEN.LANDING);
-  }, []);
+    navigateToScreen(SCREEN.LANDING, { resetHistory: true });
+  }, [navigateToScreen]);
 
   const handleReturnAfterLogin = useCallback(() => {
-    screenHistoryRef.current = [];
     setShowPublicAfterLogin(true);
-    setScreen(postLoginReturnScreen || SCREEN.LANDING);
+    navigateToScreen(postLoginReturnScreen || SCREEN.LANDING, { resetHistory: true });
     setLoginReturnScreen(SCREEN.LANDING);
-  }, [postLoginReturnScreen]);
+  }, [navigateToScreen, postLoginReturnScreen]);
 
   const handleRestaurantApplicationVerified = useCallback(() => {
     setAccountRole(USER_ROLES.RESTAURANT_OWNER);
@@ -364,6 +365,7 @@ export default function App() {
         {screen === SCREEN.POST_LOGIN ? (
           <PostLoginTransition
             returnScreen={postLoginReturnScreen}
+            onBack={handlePostLoginBack}
             onContinue={handleContinueToApp}
             onReturn={handleReturnAfterLogin}
           />
@@ -385,10 +387,9 @@ export default function App() {
               const nextReturnScreen = loginReturnScreen || SCREEN.LANDING;
               setAccessMessage('');
               setSession(nextSession);
-              screenHistoryRef.current = [];
               setPostLoginReturnScreen(nextReturnScreen);
               setShowPublicAfterLogin(false);
-              setScreen(SCREEN.POST_LOGIN);
+              navigateToScreen(SCREEN.POST_LOGIN, { replace: true });
               setLoginReturnScreen(SCREEN.LANDING);
             }}
           />
@@ -396,6 +397,7 @@ export default function App() {
           <WebPage
             supabase={supabase}
             isAuthenticated={Boolean(session)}
+            onBack={handleGoBack}
             onContinueToApp={handleContinueToApp}
             onOpenLogin={() => handleOpenLogin(SCREEN.LANDING)}
             onOpenRestaurantSignup={handleOpenRestaurantSignup}
@@ -419,6 +421,7 @@ export default function App() {
       <RestaurantDashboardPage
         session={session}
         supabase={supabase}
+        onBack={handleGoBack}
         onLogout={handleLogout}
       />
     );
@@ -429,6 +432,7 @@ export default function App() {
       <AdminDashboardPage
         session={session}
         supabase={supabase}
+        onBack={handleGoBack}
         onLogout={handleLogout}
       />
     );
@@ -439,6 +443,7 @@ export default function App() {
       <DiscoveryPage
         session={session}
         supabase={supabase}
+        onBack={handleGoBack}
         onLogout={handleLogout}
       />
     </CartProvider>

@@ -6,6 +6,7 @@ import {
   onlyDigits,
 } from '@repo/utils'
 import { Button, Input, Logo, usePhoneAuthFlow } from '@repo/ui'
+import BackButton from './BackButton'
 import './LoginPage.css'
 
 const LOGIN_COPY = {
@@ -175,9 +176,7 @@ export default function LoginPage({ supabase, notice = '', onAuthenticated, onBa
             <span>Chito Mitho</span>
           </button>
 
-          <button type="button" className="btn btn-outline login-home-button" onClick={handleNavigateAway}>
-            Back
-          </button>
+          <BackButton className="login-home-button" onClick={handleNavigateAway} />
         </div>
       </nav>
 

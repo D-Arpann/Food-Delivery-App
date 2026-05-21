@@ -3,6 +3,7 @@ import { DeviceFrameset } from 'react-device-frameset'
 import 'react-device-frameset/styles/marvel-devices.min.css'
 import { submitContactForm } from '@repo/api'
 import { AppScreenshot, HeroIllustration, Logo } from '@repo/ui'
+import BackButton from './BackButton'
 import Chatbot from './Chatbot'
 import './WebPage.css'
 
@@ -59,6 +60,7 @@ const steps = [
 export default function WebPage({
   supabase,
   isAuthenticated = false,
+  onBack,
   onContinueToApp,
   onOpenLogin,
   onOpenRestaurantSignup,
@@ -178,6 +180,7 @@ export default function WebPage({
           </ul>
 
           <div className="nav-right">
+            <BackButton className="landing-back-button" onClick={onBack} />
             <button
               type="button"
               className="btn btn-outline nav-restaurant-btn"

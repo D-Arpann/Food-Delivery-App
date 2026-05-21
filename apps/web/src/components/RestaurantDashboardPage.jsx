@@ -22,7 +22,9 @@ import {
   getShortAddress,
   normalizeMenuCategory,
 } from '@repo/utils';
+import BackButton from './BackButton';
 import './RestaurantDashboardPage.css';
+import useHistoryNavigation from '../hooks/useHistoryNavigation';
 
 const DASHBOARD_TAB = {
   OVERVIEW: 'overview',
@@ -30,6 +32,12 @@ const DASHBOARD_TAB = {
   MENU: 'menu',
   SETTINGS: 'settings',
 };
+
+const RESTAURANT_DASHBOARD_HISTORY_KEY = 'chito-mitho-restaurant-dashboard-tab';
+
+function isDashboardTab(value) {
+  return Object.values(DASHBOARD_TAB).includes(value);
+}
 
 const emptyMenuForm = {
   id: '',
@@ -505,7 +513,7 @@ function OperatingSettings({
   );
 }
 
-export default function RestaurantDashboardPage({ session, supabase, onLogout }) {
+export default function RestaurantDashboardPage({ session, supabase, onBack, onLogout }) {
   const [activeTab, setActiveTab] = useState(DASHBOARD_TAB.OVERVIEW);
   const [restaurant, setRestaurant] = useState(null);
   const [orders, setOrders] = useState([]);
@@ -524,6 +532,18 @@ export default function RestaurantDashboardPage({ session, supabase, onLogout })
   const [profileForm, setProfileForm] = useState(emptyProfileForm);
   const [acceptingOrders, setAcceptingOrders] = useState(true);
   const [operatingHours, setOperatingHours] = useState(() => getDefaultRestaurantOperatingHours());
+
+  const {
+    goBack: handleDashboardBack,
+    navigate: navigateDashboardTab,
+  } = useHistoryNavigation({
+    value: activeTab,
+    onChange: setActiveTab,
+    stateKey: RESTAURANT_DASHBOARD_HISTORY_KEY,
+    fallbackValue: DASHBOARD_TAB.OVERVIEW,
+    isValidValue: isDashboardTab,
+    onFallback: onBack,
+  });
 
   const ownerId = session?.user?.id || '';
 
@@ -599,13 +619,13 @@ export default function RestaurantDashboardPage({ session, supabase, onLogout })
         setOrders((current) => mergeOrder(current, nextOrder));
         setIncomingOrder(nextOrder);
         setSelectedOrderId(nextOrder.id);
-        setActiveTab(DASHBOARD_TAB.ORDERS);
+        navigateDashboardTab(DASHBOARD_TAB.ORDERS);
       },
       () => {
         setMessage('Realtime order alerts are unavailable. Use refresh to check for new orders.');
       },
     );
-  }, [restaurant?.id, supabase]);
+  }, [navigateDashboardTab, restaurant?.id, supabase]);
 
   const selectedOrder = useMemo(
     () => orders.find((order) => order.id === selectedOrderId) || orders[0] || null,
@@ -668,40 +688,6 @@ export default function RestaurantDashboardPage({ session, supabase, onLogout })
     setOrderBusy('');
   };
 
-  const handleRefresh = async () => {
-    if (!restaurant?.id) {
-      return;
-    }
-
-    setLoading(true);
-    setError('');
-
-    const { data, error: dashboardError } = await fetchRestaurantDashboard(supabase, ownerId);
-
-    if (dashboardError) {
-      setError(dashboardError.message || 'Could not refresh dashboard.');
-    } else {
-      const nextRestaurant = data?.restaurant || restaurant;
-      setRestaurant(nextRestaurant);
-      setProfileForm(buildRestaurantProfileForm(nextRestaurant));
-      setOrders(data?.orders || []);
-      setMenuItems(data?.menuItems || []);
-
-      if (nextRestaurant?.id) {
-        const { data: settingsData, error: settingsError } = await fetchRestaurantOperatingSettings(supabase, nextRestaurant.id);
-
-        if (settingsError) {
-          setError(settingsError.message || 'Could not refresh restaurant settings.');
-        } else {
-          setAcceptingOrders(settingsData?.isActive ?? Boolean(nextRestaurant.is_active));
-          setOperatingHours(settingsData?.operatingHours || getDefaultRestaurantOperatingHours());
-        }
-      }
-    }
-
-    setLoading(false);
-  };
-
   const handleMenuChange = (field, value) => {
     setMenuForm((current) => ({
       ...current,
@@ -716,7 +702,7 @@ export default function RestaurantDashboardPage({ session, supabase, onLogout })
   };
 
   const handleEditMenuItem = (item) => {
-    setActiveTab(DASHBOARD_TAB.MENU);
+    navigateDashboardTab(DASHBOARD_TAB.MENU);
     setMenuForm({
       id: item.id,
       name: item.name || '',
@@ -931,7 +917,10 @@ export default function RestaurantDashboardPage({ session, supabase, onLogout })
               <img src={Logo} alt="Chito Mitho logo" />
               <span>Chito Mitho</span>
             </div>
-            <button type="button" className="restaurant-dashboard-logout" onClick={onLogout}>Logout</button>
+            <div className="restaurant-dashboard-nav-actions">
+              <BackButton onClick={handleDashboardBack} />
+              <button type="button" className="restaurant-dashboard-logout" onClick={onLogout}>Logout</button>
+            </div>
           </div>
         </nav>
         <section className="restaurant-dashboard-stage restaurant-dashboard-empty-state">
@@ -950,12 +939,13 @@ export default function RestaurantDashboardPage({ session, supabase, onLogout })
     <main className="restaurant-dashboard-shell">
       <nav className="restaurant-dashboard-nav">
         <div className="restaurant-dashboard-nav-inner">
-          <button type="button" className="restaurant-dashboard-brand" onClick={() => setActiveTab(DASHBOARD_TAB.OVERVIEW)}>
+          <button type="button" className="restaurant-dashboard-brand" onClick={() => navigateDashboardTab(DASHBOARD_TAB.OVERVIEW)}>
             <img src={Logo} alt="Chito Mitho logo" />
             <span>{restaurant.name}</span>
           </button>
 
           <div className="restaurant-dashboard-nav-actions">
+            <BackButton onClick={handleDashboardBack} />
             <button type="button" className="restaurant-dashboard-logout" onClick={onLogout}>Logout</button>
           </div>
         </div>
@@ -992,20 +982,20 @@ export default function RestaurantDashboardPage({ session, supabase, onLogout })
             </div>
           </div>
 
-          <button type="button" className={activeTab === DASHBOARD_TAB.OVERVIEW ? 'is-active' : ''} onClick={() => setActiveTab(DASHBOARD_TAB.OVERVIEW)}>
+          <button type="button" className={activeTab === DASHBOARD_TAB.OVERVIEW ? 'is-active' : ''} onClick={() => navigateDashboardTab(DASHBOARD_TAB.OVERVIEW)}>
             <IconDashboard />
             Overview
           </button>
-          <button type="button" className={activeTab === DASHBOARD_TAB.ORDERS ? 'is-active' : ''} onClick={() => setActiveTab(DASHBOARD_TAB.ORDERS)}>
+          <button type="button" className={activeTab === DASHBOARD_TAB.ORDERS ? 'is-active' : ''} onClick={() => navigateDashboardTab(DASHBOARD_TAB.ORDERS)}>
             <IconOrders />
             Orders
             {metrics.pendingOrders ? <span>{metrics.pendingOrders}</span> : null}
           </button>
-          <button type="button" className={activeTab === DASHBOARD_TAB.MENU ? 'is-active' : ''} onClick={() => setActiveTab(DASHBOARD_TAB.MENU)}>
+          <button type="button" className={activeTab === DASHBOARD_TAB.MENU ? 'is-active' : ''} onClick={() => navigateDashboardTab(DASHBOARD_TAB.MENU)}>
             <IconMenu />
             Menu
           </button>
-          <button type="button" className={activeTab === DASHBOARD_TAB.SETTINGS ? 'is-active' : ''} onClick={() => setActiveTab(DASHBOARD_TAB.SETTINGS)}>
+          <button type="button" className={activeTab === DASHBOARD_TAB.SETTINGS ? 'is-active' : ''} onClick={() => navigateDashboardTab(DASHBOARD_TAB.SETTINGS)}>
             <IconSettings />
             Settings
           </button>
@@ -1043,13 +1033,13 @@ export default function RestaurantDashboardPage({ session, supabase, onLogout })
                       <span className="restaurant-dashboard-kicker">Kitchen queue</span>
                       <h2>Active orders</h2>
                     </div>
-                    <button type="button" className="restaurant-dashboard-link" onClick={() => setActiveTab(DASHBOARD_TAB.ORDERS)}>View all</button>
+                    <button type="button" className="restaurant-dashboard-link" onClick={() => navigateDashboardTab(DASHBOARD_TAB.ORDERS)}>View all</button>
                   </div>
                   <div className="restaurant-dashboard-order-list">
                     {openOrders.slice(0, 5).map((order) => (
                       <OrderCard key={order.id} order={order} active={order.id === selectedOrderId} onSelect={(nextOrder) => {
                         setSelectedOrderId(nextOrder.id);
-                        setActiveTab(DASHBOARD_TAB.ORDERS);
+                        navigateDashboardTab(DASHBOARD_TAB.ORDERS);
                       }} />
                     ))}
                     {!openOrders.length ? <p className="restaurant-dashboard-note">No active orders right now.</p> : null}
@@ -1062,7 +1052,7 @@ export default function RestaurantDashboardPage({ session, supabase, onLogout })
                       <span className="restaurant-dashboard-kicker">Menu categories</span>
                       <h2>Categories</h2>
                     </div>
-                    <button type="button" className="restaurant-dashboard-link" onClick={() => setActiveTab(DASHBOARD_TAB.MENU)}>Manage</button>
+                    <button type="button" className="restaurant-dashboard-link" onClick={() => navigateDashboardTab(DASHBOARD_TAB.MENU)}>Manage</button>
                   </div>
                   <div className="restaurant-dashboard-category-list">
                     {categories.map((category) => (

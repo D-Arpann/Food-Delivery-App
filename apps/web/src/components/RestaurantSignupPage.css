@@ -52,7 +52,8 @@
   gap: 12px;
 }
 
-.restaurant-signup-nav-actions .btn {
+.restaurant-signup-nav-actions .btn,
+.restaurant-signup-nav-actions .app-back-button {
   padding: 9px 16px;
   font-size: 0.88rem;
 }
@@ -892,7 +893,8 @@
     flex-wrap: wrap;
   }
 
-  .restaurant-signup-nav-actions .btn {
+  .restaurant-signup-nav-actions .btn,
+  .restaurant-signup-nav-actions .app-back-button {
     flex: 1 1 160px;
     justify-content: center;
   }

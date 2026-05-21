@@ -41,13 +41,28 @@ import {
   USER_ROLES,
 } from '@repo/utils';
 import './DiscoveryPage.css';
+import BackButton from './BackButton';
 import GoogleAddressPicker from './GoogleAddressPicker';
 import RouteMap from './RouteMap';
+import useHistoryNavigation from '../hooks/useHistoryNavigation';
 import { reverseGeocode } from '../lib/googleMaps';
 
 const PAYMENT_METHOD_CASH = 'cash';
 const PAYMENT_METHOD_ESEWA = 'esewa';
 const ESEWA_PENDING_PAYMENT_KEY = 'chito-mitho-esewa-pending-payment';
+const DISCOVERY_SCREEN_HISTORY_KEY = 'chito-mitho-discovery-screen';
+const DISCOVERY_SCREEN = {
+  BROWSE: 'browse',
+  SEARCH: 'search',
+  FAVORITES: 'favorites',
+  PROFILE: 'profile',
+  CART: 'cart',
+  RESTAURANT: 'restaurant',
+};
+
+function isDiscoveryScreen(value) {
+  return Object.values(DISCOVERY_SCREEN).includes(value);
+}
 
 function SearchField({ value, onChange, placeholder = 'Search restaurants or menu items' }) {
   return (
@@ -681,7 +696,7 @@ function formatTopLocationLabel(deliveryLocation, deliveryAddress, defaultAddres
   );
 }
 
-export default function DiscoveryPage({ session, supabase, onLogout }) {
+export default function DiscoveryPage({ session, supabase, onBack, onLogout }) {
   const isTemporaryAuth = Boolean(session?.isTemporaryAuth);
   const sessionProfileSettings = useMemo(
     () => buildSessionCustomerSettings(session),
@@ -694,7 +709,7 @@ export default function DiscoveryPage({ session, supabase, onLogout }) {
   const [feed, setFeed] = useState([]);
   const [feedRefreshKey, setFeedRefreshKey] = useState(0);
   const [activeRestaurantId, setActiveRestaurantId] = useState(null);
-  const [screen, setScreen] = useState('browse');
+  const [screen, setScreen] = useState(DISCOVERY_SCREEN.BROWSE);
   const [deliveryAddress, setDeliveryAddress] = useState(initialAddress);
   const [deliveryLocation, setDeliveryLocation] = useState(() => (
     sessionProfileSettings.addresses.find((entry) => entry.id === sessionProfileSettings.defaultAddressId) || null
@@ -755,6 +770,18 @@ export default function DiscoveryPage({ session, supabase, onLogout }) {
     dismissNotice,
     getSummary,
   } = useCart();
+
+  const {
+    goBack: handleDiscoveryBack,
+    navigate: navigateDiscoveryScreen,
+  } = useHistoryNavigation({
+    value: screen,
+    onChange: setScreen,
+    stateKey: DISCOVERY_SCREEN_HISTORY_KEY,
+    fallbackValue: DISCOVERY_SCREEN.BROWSE,
+    isValidValue: isDiscoveryScreen,
+    onFallback: onBack,
+  });
 
   useEffect(() => () => {
     Object.values(riderLicensePreviews).forEach((previewUrl) => {
@@ -855,7 +882,7 @@ export default function DiscoveryPage({ session, supabase, onLogout }) {
 
     async function resolveEsewaReturn() {
       const pendingPayment = readPendingEsewaPayment();
-      setScreen('cart');
+      navigateDiscoveryScreen(DISCOVERY_SCREEN.CART, { replace: true });
       setCartView('orders');
       setOrderView('current');
 
@@ -940,7 +967,7 @@ export default function DiscoveryPage({ session, supabase, onLogout }) {
     return () => {
       active = false;
     };
-  }, [clearCart, supabase]);
+  }, [clearCart, navigateDiscoveryScreen, supabase]);
 
   useEffect(() => {
     if (!cartPreview) {
@@ -1213,24 +1240,24 @@ export default function DiscoveryPage({ session, supabase, onLogout }) {
 
   const handleOpenRestaurant = (restaurantId) => {
     setActiveRestaurantId(restaurantId);
-    setScreen('restaurant');
+    navigateDiscoveryScreen(DISCOVERY_SCREEN.RESTAURANT);
   };
 
   const handleOpenBrowseScreen = () => {
     setSearchQuery('');
-    setScreen('browse');
+    navigateDiscoveryScreen(DISCOVERY_SCREEN.BROWSE);
   };
 
   const handleOpenSearchScreen = () => {
-    setScreen('search');
+    navigateDiscoveryScreen(DISCOVERY_SCREEN.SEARCH);
   };
 
   const handleOpenFavoritesScreen = () => {
-    setScreen('favorites');
+    navigateDiscoveryScreen(DISCOVERY_SCREEN.FAVORITES);
   };
 
   const handleOpenProfileScreen = () => {
-    setScreen('profile');
+    navigateDiscoveryScreen(DISCOVERY_SCREEN.PROFILE);
   };
 
   const handleOpenCartScreen = () => {
@@ -1240,20 +1267,20 @@ export default function DiscoveryPage({ session, supabase, onLogout }) {
     } else {
       setCartView('cart');
     }
-    setScreen('cart');
+    navigateDiscoveryScreen(DISCOVERY_SCREEN.CART);
   };
 
   const handleTopSearchChange = (value) => {
     setSearchQuery(value);
 
-    if (screen !== 'restaurant' && String(value || '').trim()) {
-      setScreen('search');
+    if (screen !== DISCOVERY_SCREEN.RESTAURANT && String(value || '').trim()) {
+      navigateDiscoveryScreen(DISCOVERY_SCREEN.SEARCH);
     }
   };
 
   const handleQuickCategorySearch = (category) => {
     setSearchQuery(category);
-    setScreen('search');
+    navigateDiscoveryScreen(DISCOVERY_SCREEN.SEARCH);
   };
 
   const handleToggleFavoriteRestaurant = (restaurant) => {
@@ -1395,7 +1422,7 @@ export default function DiscoveryPage({ session, supabase, onLogout }) {
     if (hasBlockingCurrentOrder) {
       setCartView('orders');
       setOrderView('current');
-      setScreen('cart');
+      navigateDiscoveryScreen(DISCOVERY_SCREEN.CART);
       setCheckoutMessage('Finish your ongoing order before placing another.');
       return;
     }
@@ -1914,6 +1941,13 @@ export default function DiscoveryPage({ session, supabase, onLogout }) {
           </button>
 
           <div className="discover-nav-actions">
+            <BackButton
+              variant="icon"
+              className="discover-back-button"
+              onClick={handleDiscoveryBack}
+              aria-label="Back"
+              title="Back"
+            />
             <button
               type="button"
               className={`discover-main-btn ${screen === 'browse' ? 'is-active' : ''}`}
@@ -2041,7 +2075,7 @@ export default function DiscoveryPage({ session, supabase, onLogout }) {
                   onClick={() => {
                     setCartView('orders');
                     setOrderView('current');
-                    setScreen('cart');
+                    navigateDiscoveryScreen(DISCOVERY_SCREEN.CART);
                   }}
                 >
                   Track
@@ -2955,7 +2989,7 @@ export default function DiscoveryPage({ session, supabase, onLogout }) {
             className="discover-cart-preview-action"
             onClick={() => {
               setCartPreview(null);
-              setScreen('cart');
+              navigateDiscoveryScreen(DISCOVERY_SCREEN.CART);
             }}
           >
             View cart

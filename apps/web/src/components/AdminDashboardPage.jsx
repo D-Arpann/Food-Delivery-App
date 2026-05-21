@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   deleteAdminProfile,
   fetchAdminDashboard,
@@ -13,7 +13,9 @@ import {
 } from '@repo/api';
 import { Logo } from '@repo/ui';
 import { formatNpr, getShortAddress, USER_ROLES } from '@repo/utils';
+import BackButton from './BackButton';
 import './AdminDashboardPage.css';
+import useHistoryNavigation from '../hooks/useHistoryNavigation';
 
 const ADMIN_TAB = {
   OVERVIEW: 'overview',
@@ -22,6 +24,12 @@ const ADMIN_TAB = {
   MESSAGES: 'messages',
   ANALYTICS: 'analytics',
 };
+
+const ADMIN_DASHBOARD_HISTORY_KEY = 'chito-mitho-admin-dashboard-tab';
+
+function isAdminTab(value) {
+  return Object.values(ADMIN_TAB).includes(value);
+}
 
 const tabCopy = {
   [ADMIN_TAB.OVERVIEW]: {
@@ -149,7 +157,6 @@ function ApplicationCard({
   title,
   subtitle,
   meta,
-  status,
   reason,
   profileImageUrl,
   bannerUrl,
@@ -299,7 +306,7 @@ function MessageRow({ submission, busy, onMarkRead }) {
   );
 }
 
-export default function AdminDashboardPage({ session, supabase, onLogout }) {
+export default function AdminDashboardPage({ session, supabase, onBack, onLogout }) {
   const [activeTab, setActiveTab] = useState(ADMIN_TAB.OVERVIEW);
   const [dashboard, setDashboard] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -309,6 +316,18 @@ export default function AdminDashboardPage({ session, supabase, onLogout }) {
   const [contactSubmissions, setContactSubmissions] = useState([]);
   const [contactLoading, setContactLoading] = useState(false);
   const [userSearch, setUserSearch] = useState('');
+
+  const {
+    goBack: handleAdminBack,
+    navigate: navigateAdminTab,
+  } = useHistoryNavigation({
+    value: activeTab,
+    onChange: setActiveTab,
+    stateKey: ADMIN_DASHBOARD_HISTORY_KEY,
+    fallbackValue: ADMIN_TAB.OVERVIEW,
+    isValidValue: isAdminTab,
+    onFallback: onBack,
+  });
 
   const adminName = session?.user?.user_metadata?.full_name || session?.user?.email || 'Admin';
   const activeCopy = tabCopy[activeTab] || tabCopy[ADMIN_TAB.OVERVIEW];
@@ -331,7 +350,7 @@ export default function AdminDashboardPage({ session, supabase, onLogout }) {
     });
   }, [dashboard?.activeUsers]);
 
-  const loadDashboard = async ({ silent = false } = {}) => {
+  const loadDashboard = useCallback(async ({ silent = false } = {}) => {
     if (!silent) {
       setLoading(true);
     }
@@ -349,7 +368,7 @@ export default function AdminDashboardPage({ session, supabase, onLogout }) {
     }
 
     setLoading(false);
-  };
+  }, [supabase]);
 
   useEffect(() => {
     let active = true;
@@ -387,7 +406,7 @@ export default function AdminDashboardPage({ session, supabase, onLogout }) {
       () => loadDashboard({ silent: true }),
       () => {},
     );
-  }, [supabase]);
+  }, [loadDashboard, supabase]);
 
   // Load contact submissions
   useEffect(() => {
@@ -546,12 +565,13 @@ export default function AdminDashboardPage({ session, supabase, onLogout }) {
     <main className="admin-dashboard-shell">
       <nav className="admin-dashboard-nav">
         <div className="admin-dashboard-nav-inner">
-          <button type="button" className="admin-dashboard-brand" onClick={() => setActiveTab(ADMIN_TAB.OVERVIEW)}>
+          <button type="button" className="admin-dashboard-brand" onClick={() => navigateAdminTab(ADMIN_TAB.OVERVIEW)}>
             <img src={Logo} alt="Chito Mitho logo" />
             <span>Admin Console</span>
           </button>
 
           <div className="admin-dashboard-nav-actions">
+            <BackButton onClick={handleAdminBack} />
             <button type="button" className="admin-dashboard-logout" onClick={onLogout}>Logout</button>
           </div>
         </div>
@@ -567,25 +587,25 @@ export default function AdminDashboardPage({ session, supabase, onLogout }) {
             </div>
           </div>
 
-          <button type="button" className={activeTab === ADMIN_TAB.OVERVIEW ? 'is-active' : ''} onClick={() => setActiveTab(ADMIN_TAB.OVERVIEW)}>
+          <button type="button" className={activeTab === ADMIN_TAB.OVERVIEW ? 'is-active' : ''} onClick={() => navigateAdminTab(ADMIN_TAB.OVERVIEW)}>
             <IconGrid />
             Overview
           </button>
-          <button type="button" className={activeTab === ADMIN_TAB.APPROVALS ? 'is-active' : ''} onClick={() => setActiveTab(ADMIN_TAB.APPROVALS)}>
+          <button type="button" className={activeTab === ADMIN_TAB.APPROVALS ? 'is-active' : ''} onClick={() => navigateAdminTab(ADMIN_TAB.APPROVALS)}>
             <IconCheck />
             Approvals
             {pendingCount ? <span>{pendingCount}</span> : null}
           </button>
-          <button type="button" className={activeTab === ADMIN_TAB.USERS ? 'is-active' : ''} onClick={() => setActiveTab(ADMIN_TAB.USERS)}>
+          <button type="button" className={activeTab === ADMIN_TAB.USERS ? 'is-active' : ''} onClick={() => navigateAdminTab(ADMIN_TAB.USERS)}>
             <IconUsers />
             Users
           </button>
-          <button type="button" className={activeTab === ADMIN_TAB.MESSAGES ? 'is-active' : ''} onClick={() => setActiveTab(ADMIN_TAB.MESSAGES)}>
+          <button type="button" className={activeTab === ADMIN_TAB.MESSAGES ? 'is-active' : ''} onClick={() => navigateAdminTab(ADMIN_TAB.MESSAGES)}>
             <IconMail />
             Messages
             {unreadMessages ? <span>{unreadMessages}</span> : null}
           </button>
-          <button type="button" className={activeTab === ADMIN_TAB.ANALYTICS ? 'is-active' : ''} onClick={() => setActiveTab(ADMIN_TAB.ANALYTICS)}>
+          <button type="button" className={activeTab === ADMIN_TAB.ANALYTICS ? 'is-active' : ''} onClick={() => navigateAdminTab(ADMIN_TAB.ANALYTICS)}>
             <IconChart />
             Analytics
           </button>
@@ -624,7 +644,7 @@ export default function AdminDashboardPage({ session, supabase, onLogout }) {
                       <span className="admin-dashboard-kicker">Approval queue</span>
                       <h2>Needs review</h2>
                     </div>
-                    <button type="button" className="admin-dashboard-link" onClick={() => setActiveTab(ADMIN_TAB.APPROVALS)}>Review all</button>
+                    <button type="button" className="admin-dashboard-link" onClick={() => navigateAdminTab(ADMIN_TAB.APPROVALS)}>Review all</button>
                   </div>
                   <div className="admin-dashboard-mini-list">
                     {[...pendingRestaurants.slice(0, 3), ...pendingRiders.slice(0, 3)].slice(0, 5).map((item) => (
@@ -643,7 +663,7 @@ export default function AdminDashboardPage({ session, supabase, onLogout }) {
                       <span className="admin-dashboard-kicker">Orders</span>
                       <h2>Status breakdown</h2>
                     </div>
-                    <button type="button" className="admin-dashboard-link" onClick={() => setActiveTab(ADMIN_TAB.ANALYTICS)}>Analyze</button>
+                    <button type="button" className="admin-dashboard-link" onClick={() => navigateAdminTab(ADMIN_TAB.ANALYTICS)}>Analyze</button>
                   </div>
                   <div className="admin-dashboard-mini-list">
                     {orderStatusBreakdown.slice(0, 5).map((item) => (

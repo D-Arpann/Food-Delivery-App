@@ -151,6 +151,10 @@ body {
   box-shadow: var(--shadow-elevated, 0 24px 60px rgba(30, 30, 30, 0.08));
 }
 
+.post-login-back {
+  margin-bottom: 18px;
+}
+
 .post-login-mark {
   width: 48px;
   height: 48px;
