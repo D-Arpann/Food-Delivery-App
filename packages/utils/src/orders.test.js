@@ -32,6 +32,26 @@ describe('order records', () => {
     assert.equal(merged.total_amount, 545);
   });
 
+  it('drops stale derived status labels when realtime status changes without a new label', () => {
+    const existing = [{
+      id: 'order-1',
+      status: 'placed',
+      status_label: 'Order placed',
+      created_at: '2026-05-11T10:00:00.000Z',
+    }];
+
+    const updated = [{
+      id: 'order-1',
+      status: 'picked_up',
+      updated_at: '2026-05-11T10:10:00.000Z',
+    }];
+
+    const [merged] = mergeOrderRecords(existing, updated);
+
+    assert.equal(merged.status, 'picked_up');
+    assert.equal(Object.hasOwn(merged, 'status_label'), false);
+  });
+
   it('adds new realtime orders and sorts newest first', () => {
     const merged = mergeOrderRecords(
       [{ id: 'old', status: 'placed', created_at: '2026-05-11T09:00:00.000Z' }],

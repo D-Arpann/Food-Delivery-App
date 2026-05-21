@@ -26,12 +26,23 @@ export function mergeOrderRecords(primaryOrders = [], secondaryOrders = []) {
     }
 
     const current = merged.get(normalizedOrder.id);
-    merged.set(normalizedOrder.id, {
+    const nextOrder = {
       ...current,
       ...normalizedOrder,
       restaurant: normalizedOrder.restaurant || current.restaurant,
       lineItems: normalizedOrder.lineItems?.length ? normalizedOrder.lineItems : current.lineItems,
-    });
+    };
+
+    if (
+      current.status &&
+      normalizedOrder.status &&
+      current.status !== normalizedOrder.status &&
+      !Object.hasOwn(normalizedOrder, 'status_label')
+    ) {
+      delete nextOrder.status_label;
+    }
+
+    merged.set(normalizedOrder.id, nextOrder);
   });
 
   return Array.from(merged.values()).sort((left, right) => {

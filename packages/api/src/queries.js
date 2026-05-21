@@ -1314,15 +1314,27 @@ export function subscribeToCustomerOrders(client, customerId, onChange, onError)
         onChange?.(payload);
       }
     };
+    const subscriptionOptions = {
+      schema: 'public',
+      table: TABLES.CUSTOMER_ORDERS,
+      filter: `customer_id=eq.${customerId}`,
+    };
 
     const channel = client
       .channel(`customer-orders-${customerId}`)
       .on(
         'postgres_changes',
         {
-          event: '*',
-          schema: 'public',
-          table: TABLES.CUSTOMER_ORDERS,
+          event: 'INSERT',
+          ...subscriptionOptions,
+        },
+        handleChange,
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          ...subscriptionOptions,
         },
         handleChange,
       )
