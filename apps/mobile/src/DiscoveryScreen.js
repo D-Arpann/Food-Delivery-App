@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   Image,
@@ -68,6 +68,8 @@ const TAB_FAVORITES = 'favorites';
 const TAB_ORDERS = 'orders';
 const TAB_CART = 'cart';
 const TAB_PROFILE = 'profile';
+const SEARCH_VIEW_RESTAURANTS = 'restaurants';
+const SEARCH_VIEW_ITEMS = 'items';
 const ORDER_VIEW_CURRENT = 'current';
 const ORDER_VIEW_PAST = 'past';
 const PAYMENT_METHOD_CASH = 'cash';
@@ -396,6 +398,50 @@ function NonFeaturedCard({ restaurant, onPress, variant = 'default' }) {
           </View>
         </View>
       </View>
+    </Pressable>
+  );
+}
+
+function SearchModeTabs({ activeView, onChange }) {
+  return (
+    <View style={styles.searchModeTabs}>
+      <Pressable
+        style={[styles.searchModeTab, activeView === SEARCH_VIEW_RESTAURANTS && styles.searchModeTabActive]}
+        onPress={() => onChange(SEARCH_VIEW_RESTAURANTS)}
+      >
+        <Text style={[styles.searchModeTabText, activeView === SEARCH_VIEW_RESTAURANTS && styles.searchModeTabTextActive]}>
+          Restaurants
+        </Text>
+      </Pressable>
+      <Pressable
+        style={[styles.searchModeTab, activeView === SEARCH_VIEW_ITEMS && styles.searchModeTabActive]}
+        onPress={() => onChange(SEARCH_VIEW_ITEMS)}
+      >
+        <Text style={[styles.searchModeTabText, activeView === SEARCH_VIEW_ITEMS && styles.searchModeTabTextActive]}>
+          Items
+        </Text>
+      </Pressable>
+    </View>
+  );
+}
+
+function SearchItemCard({ item, restaurant, onPress }) {
+  return (
+    <Pressable style={styles.searchItemCard} onPress={onPress}>
+      <FoodImage
+        uri={item.image_url || item.imageUrl || getRestaurantImageUrl(restaurant)}
+        style={styles.searchItemImage}
+        fallbackIcon="food"
+      />
+      <View style={styles.searchItemText}>
+        <Text style={styles.searchItemName} numberOfLines={2}>{item.name}</Text>
+        <View style={styles.searchItemRestaurantPill}>
+          <Ionicons name="storefront" size={12} color={COLORS.orange} />
+          <Text style={styles.searchItemRestaurantPillText} numberOfLines={1}>{restaurant.name}</Text>
+        </View>
+        <Text style={styles.searchItemPrice}>{formatNpr(item.price || 0)}</Text>
+      </View>
+      <Ionicons name="add" size={18} color={COLORS.orange} />
     </Pressable>
   );
 }
@@ -927,6 +973,7 @@ export function DiscoveryScreen({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [activeSearchView, setActiveSearchView] = useState(SEARCH_VIEW_ITEMS);
   const [activeTab, setActiveTab] = useState(TAB_HOME);
   const [selectedRestaurantId, setSelectedRestaurantId] = useState(null);
   const [menuSelection, setMenuSelection] = useState({ itemId: null, quantity: 0 });
@@ -978,6 +1025,7 @@ export function DiscoveryScreen({
   const [locationSetupAddress, setLocationSetupAddress] = useState(null);
   const [locationSetupSaving, setLocationSetupSaving] = useState(false);
   const [locationSetupCompleted, setLocationSetupCompleted] = useState(false);
+  const searchTransition = useRef(new Animated.Value(1)).current;
 
   const {
     restaurant: cartRestaurant,
@@ -1160,6 +1208,19 @@ export function DiscoveryScreen({
   }, [activeTab, session?.isTemporaryAuth, session?.user?.id, supabase]);
 
   useEffect(() => {
+    if (activeTab !== TAB_SEARCH) {
+      return;
+    }
+
+    searchTransition.setValue(0);
+    Animated.timing(searchTransition, {
+      toValue: 1,
+      duration: 220,
+      useNativeDriver: true,
+    }).start();
+  }, [activeTab, searchTransition]);
+
+  useEffect(() => {
     if (session?.isTemporaryAuth || !session?.user?.id || !supabase) {
       return undefined;
     }
@@ -1226,6 +1287,32 @@ export function DiscoveryScreen({
   const filteredRestaurants = useMemo(
     () => filterRestaurantFeed(feed, searchQuery),
     [feed, searchQuery],
+  );
+  const searchItemGroups = useMemo(() => {
+    const hasQuery = Boolean(searchQuery.trim());
+
+    return feed
+      .map((restaurant) => {
+        const matchedItems = hasQuery
+          ? filterMenuItems(restaurant.menuItems || [], searchQuery)
+          : [];
+
+        return {
+          restaurant,
+          items: matchedItems.slice(0, 8),
+          total: matchedItems.length,
+        };
+      })
+      .filter((group) => group.items.length);
+  }, [feed, searchQuery]);
+  const searchItemResults = useMemo(
+    () => searchItemGroups.flatMap((group) => (
+      group.items.map((item) => ({
+        item,
+        restaurant: group.restaurant,
+      }))
+    )),
+    [searchItemGroups],
   );
 
   useEffect(() => {
@@ -1317,12 +1404,19 @@ export function DiscoveryScreen({
   };
 
   const openSearchFromHome = () => {
+    setActiveSearchView(SEARCH_VIEW_ITEMS);
     setActiveTab(TAB_SEARCH);
   };
 
   const handleHomeSearchChange = (value) => {
     setSearchQuery(value);
+    setActiveSearchView(SEARCH_VIEW_ITEMS);
     setActiveTab(TAB_SEARCH);
+  };
+
+  const handleSearchCategoryPress = (category) => {
+    setSearchQuery(category);
+    setActiveSearchView(SEARCH_VIEW_ITEMS);
   };
 
   const handleToggleFavoriteRestaurant = (restaurant) => {
@@ -2675,7 +2769,21 @@ export function DiscoveryScreen({
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
           >
-            <View style={styles.contentFrame}>
+            <Animated.View
+              style={[
+                styles.contentFrame,
+                styles.searchAnimatedContent,
+                {
+                  opacity: searchTransition,
+                  transform: [{
+                    translateY: searchTransition.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [14, 0],
+                    }),
+                  }],
+                },
+              ]}
+            >
               <View style={styles.ordersHeader}>
                 <View style={styles.searchHeaderLogo}>
                   <TopLogoMark />
@@ -2711,7 +2819,7 @@ export function DiscoveryScreen({
                   <Pressable
                     key={category}
                     style={[styles.searchFilterChip, searchQuery === category && styles.searchFilterChipActive]}
-                    onPress={() => setSearchQuery(category)}
+                    onPress={() => handleSearchCategoryPress(category)}
                   >
                     <Text style={[styles.searchFilterText, searchQuery === category && styles.searchFilterTextActive]}>
                       {category}
@@ -2720,9 +2828,14 @@ export function DiscoveryScreen({
                 ))}
               </ScrollView>
 
+              <SearchModeTabs
+                activeView={activeSearchView}
+                onChange={setActiveSearchView}
+              />
+
               {loading && <Text style={styles.helperText}>Loading restaurants...</Text>}
               {!loading && !!error && <Text style={styles.errorText}>{error}</Text>}
-              {!loading && !error && !filteredRestaurants.length ? (
+              {!loading && !error && activeSearchView === SEARCH_VIEW_RESTAURANTS && !filteredRestaurants.length ? (
                 <View style={styles.ordersEmptyCard}>
                   <Text style={styles.ordersEmptyTitle}>No matches found</Text>
                   <Text style={styles.ordersEmptySubtitle}>Try a restaurant name, cuisine, nearby area, or another dish.</Text>
@@ -2733,8 +2846,29 @@ export function DiscoveryScreen({
                   ) : null}
                 </View>
               ) : null}
+              {!loading && !error && activeSearchView === SEARCH_VIEW_ITEMS && !searchQuery.trim() ? (
+                <View style={styles.searchEmptyState}>
+                  <View style={styles.searchEmptyIcon}>
+                    <Ionicons name="restaurant-outline" size={22} color={COLORS.orange} />
+                  </View>
+                  <Text style={styles.searchEmptyTitle}>Search menu items</Text>
+                  <Text style={styles.searchEmptyText}>Try momo, pizza, burger, thakali, or a dish name.</Text>
+                </View>
+              ) : null}
+              {!loading && !error && activeSearchView === SEARCH_VIEW_ITEMS && searchQuery.trim() && !searchItemResults.length ? (
+                <View style={styles.searchEmptyState}>
+                  <View style={styles.searchEmptyIcon}>
+                    <Ionicons name="search-outline" size={22} color={COLORS.orange} />
+                  </View>
+                  <Text style={styles.searchEmptyTitle}>No items found</Text>
+                  <Text style={styles.searchEmptyText}>Try a different dish, cuisine, or restaurant name.</Text>
+                  <Pressable style={[styles.searchClearButton, styles.searchEmptyClearButton]} onPress={() => setSearchQuery('')}>
+                    <Text style={styles.searchClearButtonText}>Clear search</Text>
+                  </Pressable>
+                </View>
+              ) : null}
 
-              {!loading && !error && filteredRestaurants.length ? (
+              {!loading && !error && activeSearchView === SEARCH_VIEW_RESTAURANTS && filteredRestaurants.length ? (
                 <View style={styles.searchResultsList}>
                   {filteredRestaurants.map((restaurant) => (
                     <NonFeaturedCard
@@ -2746,7 +2880,22 @@ export function DiscoveryScreen({
                   ))}
                 </View>
               ) : null}
-            </View>
+              {!loading && !error && activeSearchView === SEARCH_VIEW_ITEMS && searchItemResults.length ? (
+                <View style={styles.searchItemsList}>
+                  <Text style={styles.searchItemSummary}>
+                    Items{searchQuery.trim() ? ` matching '${searchQuery.trim()}'` : ''}
+                  </Text>
+                  {searchItemResults.map(({ item, restaurant }) => (
+                    <SearchItemCard
+                      key={`${restaurant.id}-${item.id || item.name}`}
+                      item={item}
+                      restaurant={restaurant}
+                      onPress={() => openRestaurant(restaurant.id)}
+                    />
+                  ))}
+                </View>
+              ) : null}
+            </Animated.View>
           </ScrollView>
           <BottomNav
             activeTab={activeTab}
@@ -4439,6 +4588,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 22,
   },
+  searchAnimatedContent: {
+    flexGrow: 0,
+  },
   searchPageSearchWrap: {
     marginHorizontal: -4,
     marginTop: 12,
@@ -4467,14 +4619,21 @@ const styles = StyleSheet.create({
   searchFilterScroller: {
     marginHorizontal: -16,
     marginBottom: 18,
+    height: 42,
+    flexGrow: 0,
+    flexShrink: 0,
   },
   searchFilterContent: {
     paddingHorizontal: 16,
     paddingRight: 32,
     gap: 10,
+    flexGrow: 0,
+    flexShrink: 0,
+    alignItems: 'flex-start',
   },
   searchFilterChip: {
     minHeight: 36,
+    maxWidth: 150,
     borderRadius: 999,
     borderWidth: 1,
     borderColor: COLORS.line,
@@ -4482,6 +4641,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 13,
     alignItems: 'center',
     justifyContent: 'center',
+    alignSelf: 'flex-start',
+    flexGrow: 0,
+    flexShrink: 0,
   },
   searchFilterChipActive: {
     borderColor: '#FFD0AD',
@@ -4492,25 +4654,53 @@ const styles = StyleSheet.create({
     fontFamily: 'Outfit_700Bold',
     fontSize: 12,
     lineHeight: 15,
+    flexShrink: 1,
   },
   searchFilterTextActive: {
+    color: COLORS.orange,
+  },
+  searchModeTabs: {
+    minHeight: 48,
+    marginBottom: 18,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.line,
+    flexDirection: 'row',
+  },
+  searchModeTab: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderBottomWidth: 3,
+    borderBottomColor: 'transparent',
+    flexDirection: 'row',
+    gap: 6,
+  },
+  searchModeTabActive: {
+    borderBottomColor: COLORS.orange,
+  },
+  searchModeTabText: {
+    color: COLORS.ink,
+    fontFamily: 'Outfit_800ExtraBold',
+    fontSize: 14,
+    lineHeight: 18,
+  },
+  searchModeTabTextActive: {
     color: COLORS.orange,
   },
   searchResultsList: {
     marginHorizontal: -16,
     marginBottom: 28,
-    gap: 10,
-    paddingHorizontal: 10,
+    gap: 16,
+    paddingHorizontal: 16,
   },
   searchResultCard: {
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: COLORS.line,
-    backgroundColor: COLORS.white,
-    paddingHorizontal: 12,
-    paddingVertical: 11,
-    gap: 12,
-    minHeight: 96,
+    borderRadius: 0,
+    borderWidth: 0,
+    backgroundColor: 'transparent',
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+    gap: 13,
+    minHeight: 82,
     shadowOpacity: 0,
     elevation: 0,
   },
@@ -4530,6 +4720,96 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 16,
   },
+  searchItemsList: {
+    marginHorizontal: -16,
+    marginBottom: 28,
+    paddingHorizontal: 16,
+    gap: 16,
+  },
+  searchItemSummary: {
+    marginBottom: 2,
+    color: COLORS.muted,
+    fontFamily: 'Outfit_800ExtraBold',
+    fontSize: 13,
+    lineHeight: 17,
+  },
+  searchItemCard: {
+    minHeight: 82,
+    borderRadius: 0,
+    borderWidth: 0,
+    backgroundColor: 'transparent',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 13,
+  },
+  searchItemImage: {
+    width: 72,
+    height: 72,
+    borderRadius: 12,
+    backgroundColor: COLORS.soft,
+  },
+  searchItemText: {
+    flex: 1,
+    minWidth: 0,
+    gap: 5,
+  },
+  searchItemName: {
+    color: COLORS.ink,
+    fontFamily: 'Outfit_800ExtraBold',
+    fontSize: 15,
+    lineHeight: 19,
+  },
+  searchItemRestaurantPill: {
+    alignSelf: 'flex-start',
+    maxWidth: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  searchItemRestaurantPillText: {
+    color: COLORS.muted,
+    fontFamily: 'Outfit_600SemiBold',
+    fontSize: 12,
+    lineHeight: 15,
+  },
+  searchItemPrice: {
+    color: COLORS.orange,
+    fontFamily: 'Outfit_800ExtraBold',
+    fontSize: 14,
+    lineHeight: 18,
+  },
+  searchEmptyState: {
+    marginTop: 18,
+    marginBottom: 28,
+    paddingVertical: 26,
+    alignItems: 'center',
+    gap: 8,
+  },
+  searchEmptyIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 16,
+    backgroundColor: COLORS.soft,
+    borderWidth: 1,
+    borderColor: '#FFD7C5',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 2,
+  },
+  searchEmptyTitle: {
+    color: COLORS.ink,
+    fontFamily: 'Outfit_800ExtraBold',
+    fontSize: 18,
+    lineHeight: 22,
+  },
+  searchEmptyText: {
+    maxWidth: 270,
+    color: COLORS.muted,
+    fontFamily: 'Outfit_600SemiBold',
+    fontSize: 13,
+    lineHeight: 19,
+    textAlign: 'center',
+  },
   searchClearButton: {
     alignSelf: 'flex-start',
     marginTop: 16,
@@ -4539,6 +4819,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  searchEmptyClearButton: {
+    alignSelf: 'center',
+    marginTop: 10,
   },
   searchClearButtonText: {
     color: COLORS.white,
