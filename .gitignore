@@ -33,6 +33,7 @@ pnpm-debug.log*
 
 # setup script (contains real API keys)
 setup.sh
+git.sh
 
 # turbo
 .turbo/
