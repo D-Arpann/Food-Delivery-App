@@ -76,7 +76,8 @@ export default function useHistoryNavigation({
 
       depthRef.current = nextDepthFromState;
 
-      if (isValidValue(nextValue)) {
+      if (isValidValue(nextValue) && nextValue !== valueRef.current) {
+        valueRef.current = nextValue;
         onNavigate?.(nextValue, { source: 'popstate' });
         onChange(nextValue);
       }
@@ -130,17 +131,18 @@ export default function useHistoryNavigation({
       ? depthRef.current
       : getHistoryDepth();
 
-    if (typeof window !== 'undefined' && currentDepth > 0) {
+    if (typeof window !== 'undefined' && (currentDepth > 0 || window.history.length > 1)) {
       window.history.back();
-      return;
+      return true;
     }
 
     if (fallbackValue !== undefined && valueRef.current !== fallbackValue) {
       navigate(fallbackValue, { replace: true, resetHistory: true });
-      return;
+      return false;
     }
 
     onFallback?.();
+    return false;
   }, [fallbackValue, navigate, onFallback]);
 
   return {

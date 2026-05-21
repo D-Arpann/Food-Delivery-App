@@ -152,7 +152,7 @@ function clearEsewaReturnParams() {
   const url = new URL(window.location.href);
   url.searchParams.delete('payment');
   url.searchParams.delete('data');
-  window.history.replaceState({}, '', url.toString());
+  window.history.replaceState(window.history.state || {}, '', url.toString());
 }
 
 function IconMenu() {
