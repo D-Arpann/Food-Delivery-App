@@ -3179,7 +3179,6 @@ export function DiscoveryScreen({
                         compact
                         label=""
                         value={deliveryAddress}
-                        syncValueToQuery={false}
                         coordinates={(deliveryLocation || defaultAddressEntry)?.coordinates}
                         placeholder="Search delivery address"
                         currentLocationSuggestion={{
@@ -3477,6 +3476,12 @@ export function DiscoveryScreen({
                     value={addressDraft.address}
                     coordinates={addressDraft.coordinates}
                     placeholder="Search street, area, or landmark"
+                    currentLocationSuggestion={{
+                      title: 'Use current location',
+                      subtitle: 'Use GPS for this address',
+                      loading: locationLoading,
+                      onPress: handleUseCurrentDraftLocation,
+                    }}
                     onChange={(nextAddress) => {
                       setAddressDraft((current) => ({
                         ...current,
