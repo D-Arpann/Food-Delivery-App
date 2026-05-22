@@ -9,7 +9,6 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  useWindowDimensions,
   View,
 } from 'react-native';
 import * as Location from 'expo-location';
@@ -252,6 +251,15 @@ function CartInlineStepper({ quantity, onIncrease, onDecrease }) {
       <Pressable style={styles.cartInlineAction} onPress={onIncrease}>
         <Ionicons name="add" size={16} color="#1E1E1E" />
       </Pressable>
+    </View>
+  );
+}
+
+function EsewaMark({ active = false }) {
+  return (
+    <View style={[styles.esewaMark, active && styles.esewaMarkActive]}>
+      <Text style={[styles.esewaMarkText, active && styles.esewaMarkTextActive]}>e</Text>
+      <Text style={[styles.esewaMarkLeaf, active && styles.esewaMarkLeafActive]}>•</Text>
     </View>
   );
 }
@@ -962,7 +970,6 @@ export function DiscoveryScreen({
   bottomInset = 0,
   onTemporaryLogout,
 }) {
-  const { height: windowHeight } = useWindowDimensions();
   const sessionCustomerSettings = useMemo(
     () => buildSessionCustomerSettings(session),
     [session],
@@ -1385,6 +1392,9 @@ export function DiscoveryScreen({
   }, [deliveryAddress, deliveryLocation?.id, profileSettings.addresses]);
   const hasSavedDeliveryAddresses = profileSettings.addresses.length > 0;
   const hasValidAddress = isValidDeliveryAddress(deliveryAddress);
+  const visibleCheckoutMessage = /^Order placed successfully/i.test(checkoutMessage)
+    ? ''
+    : checkoutMessage;
   const addressHelperText = hasValidAddress
     ? 'Delivery address ready.'
     : 'Choose a saved address or search for a complete delivery address.';
@@ -1969,6 +1979,14 @@ export function DiscoveryScreen({
     if (mode === 'saved' && hasSavedDeliveryAddresses && !selectedDeliveryAddressId) {
       handleSelectDeliveryAddress(defaultAddressEntry || profileSettings.addresses[0]);
     }
+  };
+
+  const handlePaymentMethodChange = (method) => {
+    if (paymentMethod === method) {
+      return;
+    }
+
+    setPaymentMethod(method);
   };
 
   const checkLocationAccess = async () => {
@@ -2613,12 +2631,6 @@ export function DiscoveryScreen({
     );
   }
 
-  const bottomNavReservedHeight = 90 + Math.max(bottomInset, 10);
-  const cartViewportMinHeight = Math.max(
-    windowHeight - (topInset + 50) - bottomNavReservedHeight,
-    0,
-  );
-
   return (
     <View style={[
       styles.screen,
@@ -3017,12 +3029,12 @@ export function DiscoveryScreen({
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
           >
-            <View style={[styles.contentFrame, styles.cartFrame, { minHeight: cartViewportMinHeight }]}>
+            <View style={[styles.contentFrame, styles.cartFrame]}>
               <View style={styles.cartHeader}>
                 <Pressable style={styles.cartHeaderIcon} onPress={() => setActiveTab(TAB_HOME)}>
                   <Ionicons name="arrow-back" size={22} color="#1E1E1E" />
                 </Pressable>
-                <View style={styles.screenHeaderCopy}>
+                <View style={[styles.screenHeaderCopy, styles.cartHeaderCopy]}>
                   <Text style={styles.cartTitle}>Cart</Text>
                   <Text style={styles.screenHeaderSubtitle}>{cartSummary.itemCount} items . {formatNpr(cartSummary.subtotal)}</Text>
                 </View>
@@ -3068,24 +3080,136 @@ export function DiscoveryScreen({
                 )
               ) : (
                 <View style={styles.cartBody}>
-                  <View style={styles.cartItemsList}>
-                    {cartGroups.map((group) => (
-                      <View key={group.restaurant.id}>
-                        {group.items.map((item) => (
-                          <CartItemCard
-                            key={item.id}
-                            item={item}
-                            restaurantName={group.restaurant.name || 'Selected restaurant'}
-                            onIncrease={() => incrementItem(group.restaurant, item)}
-                            onDecrease={() => decrementItem(group.restaurant, item)}
-                          />
-                        ))}
+                  <View style={styles.cartItemsCard}>
+                    <View style={styles.cartSectionHeader}>
+                      <View>
+                        <Text style={styles.cartSectionTitle}>Order items</Text>
+                        <Text style={styles.cartSectionSubtitle}>Items are ready for checkout</Text>
                       </View>
-                    ))}
+                    </View>
+
+                    <View style={styles.cartItemsList}>
+                      {cartGroups.map((group) => (
+                        <View key={group.restaurant.id}>
+                          {group.items.map((item) => (
+                            <CartItemCard
+                              key={item.id}
+                              item={item}
+                              restaurantName={group.restaurant.name || 'Selected restaurant'}
+                              onIncrease={() => incrementItem(group.restaurant, item)}
+                              onDecrease={() => decrementItem(group.restaurant, item)}
+                            />
+                          ))}
+                        </View>
+                      ))}
+                    </View>
                   </View>
 
+                  <View style={styles.deliveryAddressBox}>
+                    <View style={styles.deliveryAddressHead}>
+                      <View style={styles.deliveryAddressTitleWrap}>
+                        <Ionicons name="location-outline" size={18} color={COLORS.orange} />
+                        <Text style={styles.deliveryAddressTitle}>Delivery address</Text>
+                      </View>
+                    </View>
+
+                    {hasSavedDeliveryAddresses ? (
+                      <View style={styles.deliveryModeTabs}>
+                        <Pressable
+                          style={[styles.deliveryModeTab, deliveryAddressMode === 'saved' && styles.deliveryModeTabActive]}
+                          onPress={() => handleDeliveryAddressModeChange('saved')}
+                          accessibilityLabel="Use saved address"
+                        >
+                          <Ionicons
+                            name="bookmarks-outline"
+                            size={15}
+                            color={deliveryAddressMode === 'saved' ? COLORS.orange : COLORS.muted}
+                          />
+                          <Text style={[styles.deliveryModeText, deliveryAddressMode === 'saved' && styles.deliveryModeTextActive]}>
+                            Saved
+                          </Text>
+                        </Pressable>
+                        <Pressable
+                          style={[styles.deliveryModeTab, deliveryAddressMode === 'search' && styles.deliveryModeTabActive]}
+                          onPress={() => handleDeliveryAddressModeChange('search')}
+                          accessibilityLabel="Search delivery address"
+                        >
+                          <Ionicons
+                            name="search-outline"
+                            size={15}
+                            color={deliveryAddressMode === 'search' ? COLORS.orange : COLORS.muted}
+                          />
+                          <Text style={[styles.deliveryModeText, deliveryAddressMode === 'search' && styles.deliveryModeTextActive]}>
+                            Search
+                          </Text>
+                        </Pressable>
+                      </View>
+                    ) : null}
+
+                    {hasSavedDeliveryAddresses && deliveryAddressMode === 'saved' ? (
+                      <View style={styles.savedAddressList}>
+                        {profileSettings.addresses.map((address) => {
+                          const selected = address.id === selectedDeliveryAddressId;
+
+                          return (
+                            <Pressable
+                              key={address.id}
+                              style={[styles.savedAddressRow, selected && styles.savedAddressRowActive]}
+                              onPress={() => handleSelectDeliveryAddress(address)}
+                            >
+                              <View style={styles.savedAddressTextWrap}>
+                                <Text style={styles.savedAddressLabel} numberOfLines={1}>
+                                  {address.label || 'Saved address'}
+                                </Text>
+                                <Text style={styles.savedAddressText} numberOfLines={2}>
+                                  {getShortAddress(address.address)}
+                                </Text>
+                              </View>
+                              <Ionicons
+                                name={selected ? 'checkmark-circle' : 'ellipse-outline'}
+                                size={19}
+                                color={selected ? COLORS.orange : '#C4C0BC'}
+                              />
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+                    ) : (
+                      <MapAddressPicker
+                        compact
+                        label=""
+                        value={deliveryAddress}
+                        syncValueToQuery={false}
+                        coordinates={(deliveryLocation || defaultAddressEntry)?.coordinates}
+                        placeholder="Search delivery address"
+                        currentLocationSuggestion={{
+                          title: 'Use current location',
+                          subtitle: 'Use GPS for this delivery',
+                          loading: locationLoading,
+                          onPress: handleUseCurrentDeliveryLocation,
+                        }}
+                        onChange={(nextAddress) => {
+                          setDeliveryAddress(nextAddress.address);
+                          setDeliveryLocation(nextAddress);
+                          if (checkoutMessage) {
+                            setCheckoutMessage('');
+                          }
+                        }}
+                      />
+                    )}
+                  </View>
+
+                  {!hasValidAddress ? (
+                    <Text style={styles.addressHelperText}>
+                      {addressHelperText}
+                    </Text>
+                  ) : null}
+
                   <View style={styles.billCard}>
-                    <Text style={styles.billTitle}>Bill Details</Text>
+                    <View style={styles.cartSectionHeader}>
+                      <Text style={styles.cartSectionTitle}>Receipt</Text>
+                      <Text style={styles.billMiniTotal}>{formatNpr(cartSummary.total)}</Text>
+                    </View>
 
                     <View style={styles.billPanel}>
                       <View style={styles.billRow}>
@@ -3102,178 +3226,71 @@ export function DiscoveryScreen({
                       </View>
                     </View>
 
-                    <View style={styles.deliveryAddressBox}>
-                      <View style={styles.deliveryAddressHead}>
-                        <View style={styles.deliveryAddressTitleWrap}>
-                          <Ionicons name="location-outline" size={18} color={COLORS.orange} />
-                          <Text style={styles.deliveryAddressTitle}>Delivery address</Text>
-                        </View>
-                      </View>
-
-                      {hasSavedDeliveryAddresses ? (
-                        <View style={styles.deliveryModeTabs}>
-                          <Pressable
-                            style={[styles.deliveryModeTab, deliveryAddressMode === 'saved' && styles.deliveryModeTabActive]}
-                            onPress={() => handleDeliveryAddressModeChange('saved')}
-                            accessibilityLabel="Use saved address"
-                          >
-                            <Ionicons
-                              name="bookmarks-outline"
-                              size={15}
-                              color={deliveryAddressMode === 'saved' ? COLORS.orange : COLORS.muted}
-                            />
-                            <Text style={[styles.deliveryModeText, deliveryAddressMode === 'saved' && styles.deliveryModeTextActive]}>
-                              Saved
-                            </Text>
-                          </Pressable>
-                          <Pressable
-                            style={[styles.deliveryModeTab, deliveryAddressMode === 'search' && styles.deliveryModeTabActive]}
-                            onPress={() => handleDeliveryAddressModeChange('search')}
-                            accessibilityLabel="Search delivery address"
-                          >
-                            <Ionicons
-                              name="search-outline"
-                              size={15}
-                              color={deliveryAddressMode === 'search' ? COLORS.orange : COLORS.muted}
-                            />
-                            <Text style={[styles.deliveryModeText, deliveryAddressMode === 'search' && styles.deliveryModeTextActive]}>
-                              Search
-                            </Text>
-                          </Pressable>
-                        </View>
-                      ) : null}
-
-                      {hasSavedDeliveryAddresses && deliveryAddressMode === 'saved' ? (
-                        <View style={styles.savedAddressList}>
-                          {profileSettings.addresses.map((address) => {
-                            const selected = address.id === selectedDeliveryAddressId;
-
-                            return (
-                              <Pressable
-                                key={address.id}
-                                style={[styles.savedAddressRow, selected && styles.savedAddressRowActive]}
-                                onPress={() => handleSelectDeliveryAddress(address)}
-                              >
-                                <View style={styles.savedAddressTextWrap}>
-                                  <Text style={styles.savedAddressLabel} numberOfLines={1}>
-                                    {address.label || 'Saved address'}
-                                  </Text>
-                                  <Text style={styles.savedAddressText} numberOfLines={2}>
-                                    {getShortAddress(address.address)}
-                                  </Text>
-                                </View>
-                                <Ionicons
-                                  name={selected ? 'checkmark-circle' : 'ellipse-outline'}
-                                  size={19}
-                                  color={selected ? COLORS.orange : '#C4C0BC'}
-                                />
-                              </Pressable>
-                            );
-                          })}
-                        </View>
-                      ) : (
-                        <View style={styles.cartAddressSearchRow}>
-                          <View style={styles.cartAddressSearchPicker}>
-                            <MapAddressPicker
-                              compact
-                              label="Search address"
-                              value={deliveryAddress}
-                              coordinates={(deliveryLocation || defaultAddressEntry)?.coordinates}
-                              placeholder="Search delivery address"
-                              onChange={(nextAddress) => {
-                                setDeliveryAddress(nextAddress.address);
-                                setDeliveryLocation(nextAddress);
-                                if (checkoutMessage) {
-                                  setCheckoutMessage('');
-                                }
-                              }}
-                            />
-                          </View>
-                          <Pressable
-                            style={styles.deliveryAddressIconButton}
-                            onPress={handleUseCurrentDeliveryLocation}
-                            disabled={locationLoading}
-                            accessibilityLabel="Use current location"
-                          >
-                            <MaterialIcons name={locationLoading ? 'sync' : 'my-location'} size={18} color={COLORS.orange} />
-                          </Pressable>
-                        </View>
-                      )}
-                    </View>
-
-                    {!hasValidAddress ? (
-                      <Text style={styles.addressHelperText}>
-                        {addressHelperText}
-                      </Text>
-                    ) : null}
-
-                    <View style={styles.paymentMethodCard}>
-                      <Text style={styles.paymentMethodTitle}>Payment method</Text>
-                      <View style={styles.paymentMethodOptions}>
-                        <Pressable
-                          style={[
-                            styles.paymentMethodOption,
-                            paymentMethod === PAYMENT_METHOD_CASH && styles.paymentMethodOptionActive,
-                          ]}
-                          onPress={() => setPaymentMethod(PAYMENT_METHOD_CASH)}
-                          accessibilityLabel="Pay with cash"
-                        >
-                          <Ionicons
-                            name="cash-outline"
-                            size={18}
-                            color={paymentMethod === PAYMENT_METHOD_CASH ? COLORS.orange : COLORS.muted}
-                          />
-                          <View style={styles.paymentMethodTextWrap}>
-                            <Text style={styles.paymentMethodName}>Cash</Text>
-                            <Text style={styles.paymentMethodNote}>Pay on delivery</Text>
-                          </View>
-                        </Pressable>
-                        <Pressable
-                          style={[
-                            styles.paymentMethodOption,
-                            paymentMethod === PAYMENT_METHOD_ESEWA && styles.paymentMethodOptionActive,
-                          ]}
-                          onPress={() => setPaymentMethod(PAYMENT_METHOD_ESEWA)}
-                          accessibilityLabel="Pay with eSewa"
-                        >
-                          <Ionicons
-                            name="wallet-outline"
-                            size={18}
-                            color={paymentMethod === PAYMENT_METHOD_ESEWA ? COLORS.orange : COLORS.muted}
-                          />
-                          <View style={styles.paymentMethodTextWrap}>
-                            <Text style={styles.paymentMethodName}>eSewa</Text>
-                            <Text style={styles.paymentMethodNote}>Digital wallet</Text>
-                          </View>
-                        </Pressable>
-                      </View>
-                    </View>
-
-                    <Pressable
-                      style={[
-                        styles.checkoutButton,
-                        (checkoutLoading || !hasValidAddress) && styles.checkoutButtonDisabled,
-                      ]}
-                      onPress={handleCheckout}
-                      disabled={checkoutLoading || !hasValidAddress}
-                    >
-                      <View style={styles.checkoutButtonInner}>
-                        <View style={styles.checkoutButtonContent}>
-                          <Ionicons name="card-outline" size={18} color={COLORS.white} />
-                          <Text style={styles.checkoutButtonText}>
-                            {checkoutLoading
-                              ? 'Placing order...'
-                              : paymentMethod === PAYMENT_METHOD_ESEWA
-                                ? 'Pay with eSewa'
-                                : 'Pay with cash'}
-                          </Text>
-                        </View>
-                      </View>
-                    </Pressable>
-                    {!!checkoutMessage && (
-                      <Text style={styles.checkoutMessage}>{checkoutMessage}</Text>
+                    {!!visibleCheckoutMessage && (
+                      <Text style={styles.checkoutMessage}>{visibleCheckoutMessage}</Text>
                     )}
                   </View>
+
+                  <View style={styles.paymentMethodCard}>
+                    <Text style={styles.paymentMethodTitle}>Payment method</Text>
+                    <View style={styles.paymentMethodOptions}>
+                      <Pressable
+                        style={[
+                          styles.paymentMethodOption,
+                          paymentMethod === PAYMENT_METHOD_CASH && styles.paymentMethodOptionActive,
+                        ]}
+                        onPress={() => handlePaymentMethodChange(PAYMENT_METHOD_CASH)}
+                        accessibilityLabel="Pay with cash"
+                      >
+                        <Ionicons
+                          name="cash-outline"
+                          size={18}
+                          color={paymentMethod === PAYMENT_METHOD_CASH ? COLORS.orange : COLORS.muted}
+                        />
+                        <View style={styles.paymentMethodTextWrap}>
+                          <Text style={[
+                            styles.paymentMethodName,
+                            paymentMethod === PAYMENT_METHOD_CASH && styles.paymentMethodNameActive,
+                          ]}>Cash</Text>
+                        </View>
+                      </Pressable>
+                      <Pressable
+                        style={[
+                          styles.paymentMethodOption,
+                          paymentMethod === PAYMENT_METHOD_ESEWA && styles.paymentMethodOptionActive,
+                        ]}
+                        onPress={() => handlePaymentMethodChange(PAYMENT_METHOD_ESEWA)}
+                        accessibilityLabel="Pay with eSewa"
+                      >
+                        <EsewaMark active={paymentMethod === PAYMENT_METHOD_ESEWA} />
+                        <View style={styles.paymentMethodTextWrap}>
+                          <Text style={[
+                            styles.paymentMethodName,
+                            paymentMethod === PAYMENT_METHOD_ESEWA && styles.paymentMethodNameActive,
+                          ]}>eSewa</Text>
+                        </View>
+                      </Pressable>
+                    </View>
+                  </View>
+
+                  <Pressable
+                    style={[
+                      styles.checkoutButton,
+                      styles.checkoutButtonInline,
+                      (checkoutLoading || !hasValidAddress) && styles.checkoutButtonDisabled,
+                    ]}
+                    onPress={handleCheckout}
+                    disabled={checkoutLoading || !hasValidAddress}
+                  >
+                    <View style={styles.checkoutButtonInner}>
+                      <View style={styles.checkoutButtonContent}>
+                        <Text style={styles.checkoutButtonText}>
+                          {checkoutLoading ? 'Placing order...' : 'Place order'}
+                        </Text>
+                        <Ionicons name="arrow-forward" size={18} color={COLORS.white} />
+                      </View>
+                    </View>
+                  </Pressable>
                 </View>
               )}
             </View>
@@ -4972,22 +4989,22 @@ const styles = StyleSheet.create({
     lineHeight: 21,
   },
   cartFrame: {
-    flex: 1,
+    flexGrow: 0,
   },
   cartBody: {
-    flex: 1,
-    justifyContent: 'space-between',
+    justifyContent: 'flex-start',
     minHeight: 0,
+    gap: 20,
   },
   cartItemsList: {
-    gap: 0,
+    gap: 10,
   },
   cartHeader: {
     marginTop: 0,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 18,
+    marginBottom: 30,
   },
   cartHeaderIcon: {
     width: 40,
@@ -4998,6 +5015,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
+    padding: 0,
   },
   cartTitle: {
     color: '#1E1E1E',
@@ -5055,20 +5073,18 @@ const styles = StyleSheet.create({
     color: COLORS.ink,
   },
   cartItemCard: {
-    minHeight: 82,
-    borderRadius: 0,
-    backgroundColor: '#FFFFFF',
-    paddingLeft: 0,
-    paddingTop: 10,
-    paddingBottom: 10,
-    paddingRight: 0,
+    minHeight: 76,
+    borderRadius: 14,
+    backgroundColor: COLORS.white,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: 10,
+    gap: 12,
     position: 'relative',
-    borderWidth: 0,
+    borderWidth: 1,
     borderBottomWidth: 1,
-    borderColor: '#ECECEC',
+    borderColor: COLORS.line,
     shadowOpacity: 0,
     elevation: 0,
   },
@@ -7790,9 +7806,9 @@ const styles = StyleSheet.create({
     color: COLORS.muted,
   },
   checkoutButton: {
-    marginTop: 22,
-    minHeight: 54,
-    borderRadius: 10,
+    marginTop: 8,
+    minHeight: 68,
+    borderRadius: 34,
     backgroundColor: COLORS.orange,
     overflow: 'hidden',
     shadowOpacity: 0,
@@ -7801,8 +7817,10 @@ const styles = StyleSheet.create({
   checkoutButtonInner: {
     flex: 1,
     backgroundColor: COLORS.orange,
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 22,
   },
   restaurantCard: {
     width: 224,
@@ -8167,22 +8185,68 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   paymentMethodOptionActive: {
-    borderColor: '#FFD7C5',
+    borderColor: COLORS.orange,
     backgroundColor: COLORS.soft,
   },
   paymentMethodTextWrap: {
-    flex: 1,
+    flexShrink: 1,
   },
   paymentMethodName: {
     color: COLORS.ink,
     fontFamily: 'Outfit_800ExtraBold',
     fontSize: 14,
   },
+  paymentMethodNameActive: {
+    color: COLORS.orange,
+  },
   paymentMethodNote: {
     marginTop: 2,
     color: COLORS.muted,
     fontFamily: 'Outfit_500Medium',
     fontSize: 12,
+  },
+  paymentMethodNoteActive: {
+    color: '#B9561D',
+  },
+  esewaMark: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    backgroundColor: '#EAF8E9',
+    borderWidth: 1,
+    borderColor: '#BCE6B8',
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  esewaMarkActive: {
+    borderColor: COLORS.orange,
+    backgroundColor: COLORS.soft,
+  },
+  esewaMarkText: {
+    color: '#2FA843',
+    fontFamily: 'Outfit_800ExtraBold',
+    fontSize: 18,
+    lineHeight: 19,
+    includeFontPadding: false,
+    textAlign: 'center',
+    textAlignVertical: 'center',
+    transform: [{ translateY: -1 }],
+  },
+  esewaMarkTextActive: {
+    color: COLORS.orange,
+  },
+  esewaMarkLeaf: {
+    position: 'absolute',
+    top: 3,
+    right: 5,
+    color: '#61BD4F',
+    fontFamily: 'Outfit_800ExtraBold',
+    fontSize: 9,
+    lineHeight: 9,
+  },
+  esewaMarkLeafActive: {
+    color: COLORS.orange,
   },
   esewaModal: {
     flex: 1,
@@ -8855,78 +8919,185 @@ const styles = StyleSheet.create({
     borderColor: '#F1C6C2',
     backgroundColor: '#FFF1F0',
   },
-  deliveryAddressIconButton: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    borderWidth: 1,
-    borderColor: '#FFE0CC',
-    backgroundColor: COLORS.soft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  cartAddressSearchRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: 10,
-  },
-  cartAddressSearchPicker: {
-    flex: 1,
-    minWidth: 0,
-  },
   billCard: {
-    marginTop: 20,
-    borderRadius: 0,
-    borderWidth: 0,
-    backgroundColor: 'transparent',
-    padding: 0,
-    gap: 18,
-    shadowOpacity: 0,
-    elevation: 0,
-  },
-  billPanel: {
-    minHeight: 142,
-    borderRadius: 0,
-    backgroundColor: 'transparent',
-    borderWidth: 0,
-    borderTopWidth: 1,
-    borderBottomWidth: 1,
-    borderColor: COLORS.line,
-    paddingVertical: 16,
-    paddingHorizontal: 4,
-    justifyContent: 'space-between',
-  },
-  deliveryAddressBox: {
-    marginTop: 2,
-    borderRadius: 14,
+    marginTop: 0,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: COLORS.line,
     backgroundColor: COLORS.white,
     padding: 14,
     gap: 12,
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  billPanel: {
+    minHeight: 0,
+    borderRadius: 0,
+    backgroundColor: 'transparent',
+    borderWidth: 0,
+    borderTopWidth: 1,
+    borderColor: COLORS.line,
+    paddingTop: 12,
+    paddingBottom: 0,
+    paddingHorizontal: 2,
+    gap: 12,
+  },
+  deliveryAddressBox: {
+    marginTop: 0,
+    borderRadius: 0,
+    borderWidth: 0,
+    borderBottomWidth: 1,
+    borderColor: COLORS.line,
+    backgroundColor: 'transparent',
+    paddingTop: 0,
+    paddingHorizontal: 0,
+    paddingBottom: 20,
+    gap: 12,
   },
   paymentMethodCard: {
     marginTop: 0,
-    borderRadius: 14,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: COLORS.line,
     backgroundColor: COLORS.white,
     padding: 14,
-    gap: 10,
+    gap: 12,
+    shadowOpacity: 0,
+    elevation: 0,
   },
   paymentMethodOptions: {
-    gap: 8,
+    minHeight: 50,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.line,
+    backgroundColor: COLORS.surfaceMuted,
+    padding: 4,
+    flexDirection: 'row',
+    gap: 4,
   },
   paymentMethodOption: {
-    minHeight: 56,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#FFD7C5',
-    backgroundColor: COLORS.soft,
-    paddingHorizontal: 12,
+    flex: 1,
+    minHeight: 42,
+    borderRadius: 10,
+    borderWidth: 0,
+    borderColor: 'transparent',
+    backgroundColor: 'transparent',
+    paddingHorizontal: 10,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    justifyContent: 'center',
+    gap: 8,
+  },
+  cartItemsCard: {
+    borderRadius: 0,
+    borderWidth: 0,
+    borderBottomWidth: 0,
+    borderColor: COLORS.line,
+    backgroundColor: 'transparent',
+    padding: 0,
+    paddingBottom: 0,
+    gap: 14,
+  },
+  cartSectionHeader: {
+    minHeight: 34,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  cartHeaderCopy: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cartSectionTitle: {
+    color: COLORS.ink,
+    fontFamily: 'Outfit_800ExtraBold',
+    fontSize: 17,
+    lineHeight: 21,
+  },
+  cartSectionSubtitle: {
+    marginTop: 2,
+    color: COLORS.muted,
+    fontFamily: 'Outfit_500Medium',
+    fontSize: 12,
+    lineHeight: 15,
+  },
+  cartAddMoreButton: {
+    minHeight: 34,
+    borderRadius: 17,
+    borderWidth: 1,
+    borderColor: '#FFE0CC',
+    backgroundColor: COLORS.soft,
+    paddingHorizontal: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  cartAddMoreText: {
+    color: COLORS.orange,
+    fontFamily: 'Outfit_800ExtraBold',
+    fontSize: 12,
+  },
+  billMiniTotal: {
+    color: COLORS.ink,
+    fontFamily: 'Outfit_800ExtraBold',
+    fontSize: 15,
+  },
+  paymentMethodOptionActive: {
+    borderColor: 'transparent',
+    backgroundColor: COLORS.white,
+  },
+  paymentMethodNameActive: {
+    color: COLORS.orange,
+  },
+  paymentMethodNoteActive: {
+    color: '#B9561D',
+  },
+  esewaMarkActive: {
+    borderColor: COLORS.orange,
+    backgroundColor: COLORS.soft,
+  },
+  esewaMarkTextActive: {
+    color: COLORS.orange,
+  },
+  esewaMarkLeafActive: {
+    color: COLORS.orange,
+  },
+  checkoutButton: {
+    marginTop: 0,
+    minHeight: 54,
+    borderRadius: 12,
+    backgroundColor: COLORS.orangeHot,
+    overflow: 'hidden',
+    shadowColor: COLORS.orange,
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.18,
+    shadowRadius: 12,
+    elevation: 4,
+  },
+  checkoutButtonInner: {
+    flex: 1,
+    borderRadius: 12,
+    backgroundColor: COLORS.orangeHot,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+  },
+  checkoutButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  checkoutButtonText: {
+    color: COLORS.white,
+    fontFamily: 'Outfit_800ExtraBold',
+    fontSize: 16,
+    lineHeight: 20,
+  },
+  checkoutButtonInline: {
+    width: '100%',
+    marginTop: 14,
   },
   ordersCurrentPanel: {
     flex: 1,
@@ -8943,13 +9114,14 @@ const styles = StyleSheet.create({
   cartContent: {
     flexGrow: 1,
     paddingHorizontal: 16,
-    paddingBottom: 150,
+    paddingBottom: 32,
   },
   cartHeader: {
     minHeight: 50,
-    marginBottom: 14,
+    marginBottom: 34,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     gap: 14,
   },
   bottomNavLabelActive: {
