@@ -11,7 +11,6 @@ import { Ionicons } from '@expo/vector-icons';
 import {
   fetchPlaceDetails,
   fetchPlacePredictions,
-  getGoogleMapsApiKey,
   normalizeCoordinate,
 } from './mapUtils';
 
@@ -23,18 +22,26 @@ export function MapAddressPicker({
   placeId = '',
   onChange,
   compact = false,
+  currentLocationSuggestion = null,
+  syncValueToQuery = true,
 }) {
-  const [query, setQuery] = useState(value);
+  const [query, setQuery] = useState(() => (syncValueToQuery ? value : ''));
   const [pin, setPin] = useState(() => normalizeCoordinate(coordinates));
   const [suggestions, setSuggestions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showMap, setShowMap] = useState(false);
-  const apiKey = getGoogleMapsApiKey();
+  const [inputFocused, setInputFocused] = useState(false);
+  const trimmedQuery = query.trim();
+  const showCurrentLocationSuggestion = Boolean(
+    currentLocationSuggestion && inputFocused && !trimmedQuery,
+  );
 
   useEffect(() => {
-    setQuery(value || '');
-  }, [value]);
+    if (syncValueToQuery) {
+      setQuery(value || '');
+    }
+  }, [syncValueToQuery, value]);
 
   useEffect(() => {
     setPin(normalizeCoordinate(coordinates));
@@ -43,7 +50,7 @@ export function MapAddressPicker({
   useEffect(() => {
     let active = true;
     const timer = setTimeout(async () => {
-      if (!apiKey || query.trim().length < 3 || query.trim() === value.trim()) {
+      if (trimmedQuery.length < 3) {
         setSuggestions([]);
         return;
       }
@@ -52,7 +59,7 @@ export function MapAddressPicker({
       setError('');
 
       try {
-        const results = await fetchPlacePredictions(query);
+        const results = await fetchPlacePredictions(trimmedQuery);
         if (active) {
           setSuggestions(results.slice(0, 4));
         }
@@ -72,7 +79,7 @@ export function MapAddressPicker({
       active = false;
       clearTimeout(timer);
     };
-  }, [apiKey, query, value]);
+  }, [trimmedQuery]);
 
   const commitAddress = (next) => {
     const nextPin = normalizeCoordinate(next?.coordinates);
@@ -95,8 +102,9 @@ export function MapAddressPicker({
       const details = await fetchPlaceDetails(suggestion.placeId);
       commitAddress(details || {
         address: suggestion.description,
+        formattedAddress: suggestion.formattedAddress || suggestion.description,
         placeId: suggestion.placeId,
-        coordinates: null,
+        coordinates: suggestion.coordinates || null,
       });
       setShowMap(openMap);
     } catch (detailsError) {
@@ -104,6 +112,12 @@ export function MapAddressPicker({
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSelectCurrentLocation = () => {
+    setSuggestions([]);
+    setShowMap(false);
+    currentLocationSuggestion?.onPress?.();
   };
 
   return (
@@ -116,6 +130,7 @@ export function MapAddressPicker({
           onChangeText={(text) => {
             setQuery(text);
             setShowMap(false);
+            setError('');
             onChange?.({
               address: text,
               formattedAddress: text,
@@ -123,6 +138,7 @@ export function MapAddressPicker({
               coordinates: pin,
             });
           }}
+          onFocus={() => setInputFocused(true)}
           placeholder={placeholder}
           placeholderTextColor="#8E8781"
           style={styles.input}
@@ -130,13 +146,37 @@ export function MapAddressPicker({
         {loading ? <ActivityIndicator size="small" color="#F8964F" /> : null}
       </View>
 
-      {!!suggestions.length && (
+      {(showCurrentLocationSuggestion || !!suggestions.length) && (
         <View style={styles.suggestions}>
+          {showCurrentLocationSuggestion ? (
+            <Pressable
+              style={styles.suggestion}
+              onPress={handleSelectCurrentLocation}
+              disabled={currentLocationSuggestion.loading}
+            >
+              <View style={styles.suggestionIcon}>
+                {currentLocationSuggestion.loading ? (
+                  <ActivityIndicator size="small" color="#F8964F" />
+                ) : (
+                  <Ionicons name="navigate-outline" size={16} color="#F8964F" />
+                )}
+              </View>
+              <View style={styles.suggestionCopy}>
+                <Text style={styles.suggestionMain}>
+                  {currentLocationSuggestion.title || 'Use current location'}
+                </Text>
+                <Text style={styles.suggestionSub} numberOfLines={1}>
+                  {currentLocationSuggestion.subtitle || 'Use your device location for delivery'}
+                </Text>
+              </View>
+            </Pressable>
+          ) : null}
           {suggestions.map((suggestion) => (
             <Pressable
               key={suggestion.placeId}
               style={styles.suggestion}
               onPress={() => handleSelectSuggestion(suggestion)}
+              onLongPress={() => handleSelectSuggestion(suggestion, true)}
             >
               <View style={styles.suggestionCopy}>
                 <Text style={styles.suggestionMain}>{suggestion.mainText}</Text>
@@ -144,15 +184,6 @@ export function MapAddressPicker({
                   {suggestion.secondaryText || suggestion.description}
                 </Text>
               </View>
-              <Pressable
-                style={styles.suggestionDetailsButton}
-                onPress={(event) => {
-                  event?.stopPropagation?.();
-                  handleSelectSuggestion(suggestion, true);
-                }}
-              >
-                <Text style={styles.suggestionDetailsText}>Details</Text>
-              </Pressable>
             </Pressable>
           ))}
         </View>
@@ -219,6 +250,14 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
+  suggestionIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#FFF4EC',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   suggestionMain: {
     color: '#1E1E1E',
     fontFamily: 'Outfit_700Bold',
@@ -228,19 +267,6 @@ const styles = StyleSheet.create({
     marginTop: 2,
     color: '#6E6761',
     fontFamily: 'Outfit_500Medium',
-    fontSize: 12,
-  },
-  suggestionDetailsButton: {
-    minHeight: 32,
-    borderRadius: 16,
-    backgroundColor: '#FFF4EC',
-    paddingHorizontal: 11,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  suggestionDetailsText: {
-    color: '#D66018',
-    fontFamily: 'Outfit_700Bold',
     fontSize: 12,
   },
   mapShell: {
