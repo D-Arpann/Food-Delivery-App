@@ -256,7 +256,7 @@ export default function App() {
   };
 
   const handleOpenRestaurantSignup = () => {
-    navigateToScreen(SCREEN.RESTAURANT_SIGNUP);
+    navigateToScreen(SCREEN.RESTAURANT_SIGNUP, { replace: true, resetHistory: true });
   };
 
   const handleOpenLogin = (returnScreen = screen) => {
@@ -290,7 +290,6 @@ export default function App() {
           <RestaurantSignupPage
             supabase={supabase}
             session={session}
-            onBack={handleGoBack}
             onAuthenticated={setSession}
             onApplicationVerified={handleRestaurantApplicationVerified}
           />
@@ -334,7 +333,6 @@ export default function App() {
       <RestaurantDashboardPage
         session={session}
         supabase={supabase}
-        onBack={handleGoBack}
         onLogout={handleLogout}
       />
     );

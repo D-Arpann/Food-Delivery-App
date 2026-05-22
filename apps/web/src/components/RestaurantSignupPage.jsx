@@ -10,7 +10,6 @@ import {
 } from '@repo/api'
 import { Button, Input, Logo } from '@repo/ui'
 import { AUTH_OTP_LENGTH, getShortAddress, onlyDigits, toNepalE164Phone } from '@repo/utils'
-import BackButton from './BackButton'
 import './RestaurantSignupPage.css'
 import GoogleAddressPicker from './GoogleAddressPicker'
 
@@ -91,7 +90,6 @@ function buildFormFromApplication(application) {
 export default function RestaurantSignupPage({
   supabase,
   session,
-  onBack,
   onAuthenticated,
   onApplicationVerified,
 }) {
@@ -539,13 +537,9 @@ export default function RestaurantSignupPage({
     <main className="restaurant-signup-shell">
       <nav className="restaurant-signup-nav">
         <div className="container restaurant-signup-nav-inner">
-          <button type="button" className="restaurant-signup-nav-brand" onClick={onBack}>
+          <div className="restaurant-signup-nav-brand">
             <img src={Logo} alt="Chito Mitho logo" />
             <span>Chito Mitho</span>
-          </button>
-
-          <div className="restaurant-signup-nav-actions">
-            <BackButton onClick={onBack} />
           </div>
         </div>
       </nav>
@@ -802,12 +796,7 @@ export default function RestaurantSignupPage({
                     </div>
                   ) : null}
 
-                  <div className="restaurant-signup-action-row">
-                    <button type="button" className="restaurant-signup-back-button" onClick={() => setStep(STEP.PHONE_OTP)}>
-                      Back
-                    </button>
-                    <Button type="submit" title="Continue" style={submitButtonStyle} />
-                  </div>
+                  <Button type="submit" title="Continue" style={submitButtonStyle} />
                 </form>
               </>
             )}
@@ -855,17 +844,12 @@ export default function RestaurantSignupPage({
                     </div>
                   ) : null}
 
-                  <div className="restaurant-signup-action-row">
-                    <button type="button" className="restaurant-signup-back-button" onClick={() => setStep(STEP.LOCATION)}>
-                      Back
-                    </button>
-                    <Button
-                      type="submit"
-                      loading={loading}
-                      title={loading ? 'Submitting...' : 'Confirm and submit'}
-                      style={submitButtonStyle}
-                    />
-                  </div>
+                  <Button
+                    type="submit"
+                    loading={loading}
+                    title={loading ? 'Submitting...' : 'Confirm and submit'}
+                    style={submitButtonStyle}
+                  />
                 </form>
               </>
             )}

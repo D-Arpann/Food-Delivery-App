@@ -22,9 +22,7 @@ import {
   getShortAddress,
   normalizeMenuCategory,
 } from '@repo/utils';
-import BackButton from './BackButton';
 import './RestaurantDashboardPage.css';
-import useHistoryNavigation from '../hooks/useHistoryNavigation';
 
 const DASHBOARD_TAB = {
   OVERVIEW: 'overview',
@@ -32,12 +30,6 @@ const DASHBOARD_TAB = {
   MENU: 'menu',
   SETTINGS: 'settings',
 };
-
-const RESTAURANT_DASHBOARD_HISTORY_KEY = 'chito-mitho-restaurant-dashboard-tab';
-
-function isDashboardTab(value) {
-  return Object.values(DASHBOARD_TAB).includes(value);
-}
 
 const emptyMenuForm = {
   id: '',
@@ -513,7 +505,7 @@ function OperatingSettings({
   );
 }
 
-export default function RestaurantDashboardPage({ session, supabase, onBack, onLogout }) {
+export default function RestaurantDashboardPage({ session, supabase, onLogout }) {
   const [activeTab, setActiveTab] = useState(DASHBOARD_TAB.OVERVIEW);
   const [restaurant, setRestaurant] = useState(null);
   const [orders, setOrders] = useState([]);
@@ -533,17 +525,7 @@ export default function RestaurantDashboardPage({ session, supabase, onBack, onL
   const [acceptingOrders, setAcceptingOrders] = useState(true);
   const [operatingHours, setOperatingHours] = useState(() => getDefaultRestaurantOperatingHours());
 
-  const {
-    goBack: handleDashboardBack,
-    navigate: navigateDashboardTab,
-  } = useHistoryNavigation({
-    value: activeTab,
-    onChange: setActiveTab,
-    stateKey: RESTAURANT_DASHBOARD_HISTORY_KEY,
-    fallbackValue: DASHBOARD_TAB.OVERVIEW,
-    isValidValue: isDashboardTab,
-    onFallback: onBack,
-  });
+  const navigateDashboardTab = setActiveTab;
 
   const ownerId = session?.user?.id || '';
 
@@ -918,7 +900,6 @@ export default function RestaurantDashboardPage({ session, supabase, onBack, onL
               <span>Chito Mitho</span>
             </div>
             <div className="restaurant-dashboard-nav-actions">
-              <BackButton onClick={handleDashboardBack} />
               <button type="button" className="restaurant-dashboard-logout" onClick={onLogout}>Logout</button>
             </div>
           </div>
@@ -945,7 +926,6 @@ export default function RestaurantDashboardPage({ session, supabase, onBack, onL
           </button>
 
           <div className="restaurant-dashboard-nav-actions">
-            <BackButton onClick={handleDashboardBack} />
             <button type="button" className="restaurant-dashboard-logout" onClick={onLogout}>Logout</button>
           </div>
         </div>
