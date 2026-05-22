@@ -64,7 +64,7 @@ function isDiscoveryScreen(value) {
   return Object.values(DISCOVERY_SCREEN).includes(value);
 }
 
-function SearchField({ value, onChange, placeholder = 'Search restaurants or menu items' }) {
+function SearchField({ value, onChange, onFocus, placeholder = 'Search restaurants or menu items' }) {
   return (
     <label className="discover-search">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
@@ -74,6 +74,7 @@ function SearchField({ value, onChange, placeholder = 'Search restaurants or men
       <input
         value={value}
         onChange={(event) => onChange(event.target.value)}
+        onFocus={onFocus}
         placeholder={placeholder}
       />
     </label>
@@ -424,7 +425,6 @@ function getMenuItemImageUrl(item = {}) {
 function SearchFoodItemCard({ item, onSelectRestaurant }) {
   const imageUrl = getMenuItemImageUrl(item);
   const restaurantName = item.restaurantName || item.restaurant?.name || 'Restaurant';
-  const description = item.description || normalizeMenuCategory(item.category || 'Specials');
 
   return (
     <article className="discover-food-result-card">
@@ -437,20 +437,33 @@ function SearchFoodItemCard({ item, onSelectRestaurant }) {
           <img className="discover-food-result-image" src={imageUrl} alt={item.name} />
         ) : (
           <span className="discover-food-result-placeholder" aria-hidden="true">
-            <IconMenu />
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+              <path d="M3 11h18M5 11C5 6.6 8.1 3 12 3s7 3.6 7 8" />
+              <path d="M5 11v1a2 2 0 002 2h10a2 2 0 002-2v-1" />
+              <path d="M8 14v4a2 2 0 002 2h4a2 2 0 002-2v-4" />
+            </svg>
           </span>
         )}
 
         <span className="discover-food-result-copy">
-          <span>{restaurantName}</span>
           <h3>{item.name}</h3>
-          <p>{description}</p>
+          <span className="discover-food-result-restaurant-pill">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+              <path d="M3 21h18M5 21V7l7-4 7 4v14" />
+              <rect x="9" y="13" width="6" height="8" rx="1" />
+            </svg>
+            {restaurantName}
+          </span>
+          <strong className="discover-food-result-price">
+            {formatNpr(item.price)}
+          </strong>
         </span>
 
-        <strong className="discover-food-result-price">
-          <IconRupee />
-          {formatNpr(item.price)}
-        </strong>
+        <span className="discover-food-result-arrow" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M9 5l7 7-7 7" />
+          </svg>
+        </span>
       </button>
     </article>
   );
@@ -745,6 +758,7 @@ export default function DiscoveryPage({ session, supabase, onBack, onLogout }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchMode, setSearchMode] = useState('items');
   const [feed, setFeed] = useState([]);
   const [feedRefreshKey, setFeedRefreshKey] = useState(0);
   const [activeRestaurantId, setActiveRestaurantId] = useState(null);
@@ -1141,8 +1155,9 @@ export default function DiscoveryPage({ session, supabase, onBack, onLogout }) {
     [feed, searchQuery],
   );
 
+  const hasSearchQuery = Boolean(searchQuery.trim());
   const filteredRestaurants = searchResults.restaurants;
-  const filteredFoodItems = searchResults.foodItems;
+  const filteredFoodItems = hasSearchQuery ? searchResults.foodItems : [];
   const visibleQuickCategories = useMemo(
     () => (showAllQuickCategories ? QUICK_CATEGORIES : QUICK_CATEGORIES.slice(0, 5)),
     [showAllQuickCategories],
@@ -1316,12 +1331,21 @@ export default function DiscoveryPage({ session, supabase, onBack, onLogout }) {
     setSearchQuery(value);
 
     if (screen !== DISCOVERY_SCREEN.RESTAURANT && String(value || '').trim()) {
+      setSearchMode('items');
+      navigateDiscoveryScreen(DISCOVERY_SCREEN.SEARCH);
+    }
+  };
+
+  const handleTopSearchFocus = () => {
+    if (screen !== DISCOVERY_SCREEN.RESTAURANT) {
+      setSearchMode('items');
       navigateDiscoveryScreen(DISCOVERY_SCREEN.SEARCH);
     }
   };
 
   const handleQuickCategorySearch = (category) => {
     setSearchQuery(category);
+    setSearchMode('items');
     navigateDiscoveryScreen(DISCOVERY_SCREEN.SEARCH);
   };
 
@@ -2047,6 +2071,7 @@ export default function DiscoveryPage({ session, supabase, onBack, onLogout }) {
           <SearchField
             value={searchQuery}
             onChange={handleTopSearchChange}
+            onFocus={handleTopSearchFocus}
             placeholder={screen === 'restaurant' ? 'Search menu items' : 'Search for food, restaurants, cuisines...'}
           />
 
@@ -2198,7 +2223,37 @@ export default function DiscoveryPage({ session, supabase, onBack, onLogout }) {
                 <h2>Find exactly what you want</h2>
                 <p>Search restaurants, menu items, cuisines, or delivery areas.</p>
               </div>
-              <strong>{filteredFoodItems.length + filteredRestaurants.length} matches</strong>
+              <div className="discover-search-mode-toggle" role="radiogroup" aria-label="Search mode">
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={searchMode === 'restaurants'}
+                  className={searchMode === 'restaurants' ? 'is-active' : ''}
+                  onClick={() => setSearchMode('restaurants')}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+                    <path d="M3 21h18M5 21V7l7-4 7 4v14" />
+                    <rect x="9" y="13" width="6" height="8" rx="1" />
+                    <rect x="9" y="9" width="2.5" height="2.5" rx="0.5" />
+                    <rect x="12.5" y="9" width="2.5" height="2.5" rx="0.5" />
+                  </svg>
+                  Restaurants
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={searchMode === 'items'}
+                  className={searchMode === 'items' ? 'is-active' : ''}
+                  onClick={() => setSearchMode('items')}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+                    <path d="M3 11h18M5 11C5 6.6 8.1 3 12 3s7 3.6 7 8" />
+                    <path d="M5 11v1a2 2 0 002 2h10a2 2 0 002-2v-1" />
+                    <path d="M8 14v4a2 2 0 002 2h4a2 2 0 002-2v-4" />
+                  </svg>
+                  Items
+                </button>
+              </div>
             </header>
 
             <div className="discover-advanced-search-panel">
@@ -2215,7 +2270,7 @@ export default function DiscoveryPage({ session, supabase, onBack, onLogout }) {
                     key={category}
                     type="button"
                     className={searchQuery === category ? 'is-active' : ''}
-                    onClick={() => setSearchQuery(category)}
+                    onClick={() => handleQuickCategorySearch(category)}
                   >
                     {category}
                   </button>
@@ -2225,61 +2280,75 @@ export default function DiscoveryPage({ session, supabase, onBack, onLogout }) {
 
             {loading && <p className="discover-note">Loading restaurants...</p>}
             {!loading && error && <p className="discover-error">{error}</p>}
-            {!loading && !error && !filteredFoodItems.length && !filteredRestaurants.length ? (
+
+            {!loading && !error && searchMode === 'restaurants' && !filteredRestaurants.length ? (
               <div className="discover-empty">
                 <IconEmptySearch />
-                <h3>No matches found</h3>
-                <p>Try a restaurant name, cuisine, nearby area, or another dish.</p>
+                <h3>No restaurants found</h3>
+                <p>Try a different name, cuisine, or delivery area.</p>
                 <button type="button" className="discover-empty-btn" onClick={() => setSearchQuery('')}>Clear search</button>
               </div>
             ) : null}
 
-            {!loading && !error && (filteredFoodItems.length || filteredRestaurants.length) ? (
+            {!loading && !error && searchMode === 'items' && !hasSearchQuery ? (
+              <div className="discover-empty">
+                <IconEmptySearch />
+                <h3>Search menu items</h3>
+                <p>Try momo, pizza, burger, thakali, or a dish name.</p>
+              </div>
+            ) : null}
+
+            {!loading && !error && searchMode === 'items' && hasSearchQuery && !filteredFoodItems.length ? (
+              <div className="discover-empty">
+                <IconEmptySearch />
+                <h3>No menu items found</h3>
+                <p>Try a dish name, cuisine type, or category.</p>
+                <button type="button" className="discover-empty-btn" onClick={() => setSearchQuery('')}>Clear search</button>
+              </div>
+            ) : null}
+
+            {!loading && !error && searchMode === 'restaurants' && filteredRestaurants.length ? (
               <div className="discover-search-sections">
-                <section className="discover-search-section" aria-labelledby="discover-food-items-heading">
-                  <div className="discover-search-section-head">
-                    <h3 id="discover-food-items-heading">Food Items</h3>
-                    <span>{filteredFoodItems.length} results</span>
-                  </div>
-
-                  {filteredFoodItems.length ? (
-                    <div className="discover-food-results-grid">
-                      {filteredFoodItems.map((item) => (
-                        <SearchFoodItemCard
-                          key={`${item.restaurantId}-${item.id}`}
-                          item={item}
-                          onSelectRestaurant={handleOpenRestaurant}
-                        />
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="discover-section-empty">No items found.</p>
-                  )}
-                </section>
-
                 <section className="discover-search-section" aria-labelledby="discover-restaurants-heading">
                   <div className="discover-search-section-head">
                     <h3 id="discover-restaurants-heading">Restaurants</h3>
                     <span>{filteredRestaurants.length} results</span>
                   </div>
 
-                  {filteredRestaurants.length ? (
-                    <div className="discover-all-grid discover-search-results-grid">
-                      {filteredRestaurants.map((restaurant) => (
-                        <RestaurantCard
-                          key={restaurant.id}
-                          restaurant={restaurant}
-                          compact
-                          active={restaurant.id === resolvedActiveRestaurantId}
-                          isFavorite={favoriteRestaurantIdSet.has(restaurant.id)}
-                          onSelect={handleOpenRestaurant}
-                          onToggleFavorite={handleToggleFavoriteRestaurant}
-                        />
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="discover-section-empty">No restaurants found.</p>
-                  )}
+                  <div className="discover-all-grid discover-search-results-grid">
+                    {filteredRestaurants.map((restaurant) => (
+                      <RestaurantCard
+                        key={restaurant.id}
+                        restaurant={restaurant}
+                        compact
+                        active={restaurant.id === resolvedActiveRestaurantId}
+                        isFavorite={favoriteRestaurantIdSet.has(restaurant.id)}
+                        onSelect={handleOpenRestaurant}
+                        onToggleFavorite={handleToggleFavoriteRestaurant}
+                      />
+                    ))}
+                  </div>
+                </section>
+              </div>
+            ) : null}
+
+            {!loading && !error && searchMode === 'items' && filteredFoodItems.length ? (
+              <div className="discover-search-sections">
+                <section className="discover-search-section" aria-labelledby="discover-food-items-heading">
+                  <div className="discover-search-section-head">
+                    <h3 id="discover-food-items-heading">Menu Items</h3>
+                    <span>{filteredFoodItems.length} results</span>
+                  </div>
+
+                  <div className="discover-food-results-grid">
+                    {filteredFoodItems.map((item) => (
+                      <SearchFoodItemCard
+                        key={`${item.restaurantId}-${item.id}`}
+                        item={item}
+                        onSelectRestaurant={handleOpenRestaurant}
+                      />
+                    ))}
+                  </div>
                 </section>
               </div>
             ) : null}
