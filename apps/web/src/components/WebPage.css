@@ -557,24 +557,29 @@
 }
 
 .device-container {
+  --device-scale: 0.65;
+  --device-hover-scale: 0.67;
+  --device-hover-lift: -6px;
   display: flex;
   justify-content: center;
   align-items: center;
   padding: 0;
   margin-top: 0;
   margin-bottom: 0;
-  min-height: 520px;
+  height: calc(864px * var(--device-scale));
+  min-height: 0;
+  overflow: visible;
 }
 
 .marvel-device {
-  transform: scale(0.65);
+  transform: scale(var(--device-scale));
   transform-origin: top center;
   transition: transform 0.4s cubic-bezier(0.25, 1, 0.5, 1) !important;
   will-change: transform;
 }
 
 .device-container:hover .marvel-device {
-  transform: scale(0.67) translateY(-6px);
+  transform: scale(var(--device-hover-scale)) translateY(var(--device-hover-lift));
 }
 
 @media (max-width: 1024px) {
@@ -591,18 +596,21 @@
 
   .showcase-image { order: -1; }
 
-  .device-container { min-height: 440px; }
-
-  .marvel-device { transform: scale(0.55); }
-  .device-container:hover .marvel-device { transform: scale(0.57) translateY(-5px); }
+  .device-container {
+    --device-scale: 0.55;
+    --device-hover-scale: 0.57;
+    --device-hover-lift: -5px;
+  }
 }
 
 @media (max-width: 768px) {
   .showcase-content h2 { font-size: 2.2rem; }
 
-  .device-container { min-height: 390px; }
-  .marvel-device { transform: scale(0.5); }
-  .device-container:hover .marvel-device { transform: scale(0.52) translateY(-4px); }
+  .device-container {
+    --device-scale: 0.5;
+    --device-hover-scale: 0.52;
+    --device-hover-lift: -4px;
+  }
 
   .step-item:hover { transform: none; }
 }
