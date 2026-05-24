@@ -3024,6 +3024,98 @@
   margin-top: 14px;
 }
 
+.discover-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(30, 30, 30, 0.42);
+}
+
+.discover-active-order-dialog {
+  position: relative;
+  width: min(420px, 100%);
+  border-radius: 18px;
+  border: 1px solid var(--border, #ececec);
+  background: #fff;
+  box-shadow: 0 24px 70px rgba(30, 30, 30, 0.22);
+  padding: 24px;
+  text-align: center;
+}
+
+.discover-active-order-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--surface-muted, #fafafa);
+  color: var(--dark-primary);
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.discover-active-order-icon {
+  width: 52px;
+  height: 52px;
+  margin: 0 auto 14px;
+  border-radius: 16px;
+  background: var(--orange, #f8964f);
+  color: #fff;
+  display: grid;
+  place-items: center;
+}
+
+.discover-active-order-icon svg {
+  width: 24px;
+  height: 24px;
+}
+
+.discover-active-order-dialog h3 {
+  margin: 0;
+  color: var(--dark-primary);
+  font-size: 1.35rem;
+}
+
+.discover-active-order-dialog p {
+  margin: 8px 0 0;
+  color: var(--dark-muted);
+  line-height: 1.5;
+}
+
+.discover-active-order-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.discover-active-order-primary,
+.discover-active-order-secondary {
+  min-height: 46px;
+  border-radius: 999px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.discover-active-order-primary {
+  border: 1px solid var(--orange, #f8964f);
+  background: var(--orange, #f8964f);
+  color: #fff;
+}
+
+.discover-active-order-secondary {
+  border: 1px solid var(--border, #ececec);
+  background: #fff;
+  color: var(--dark-primary);
+}
+
 @media (max-width: 1240px) {
   .discover-shell {
     margin-left: 88px;

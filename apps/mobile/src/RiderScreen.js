@@ -19,7 +19,6 @@ import {
   logout,
   submitRiderApplication,
   subscribeToRiderJobs,
-  updateRiderAvailability,
   updateRiderDeliveryStatus,
   updateRiderLocation,
 } from '@repo/api';
@@ -213,6 +212,7 @@ export function RiderScreen({ session, supabase, topInset = 0, bottomInset = 0 }
   const [profile, setProfile] = useState(null);
   const [availableJobs, setAvailableJobs] = useState([]);
   const [activeOrders, setActiveOrders] = useState([]);
+  const [completedOrders, setCompletedOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busyKey, setBusyKey] = useState('');
   const [message, setMessage] = useState('');
@@ -227,10 +227,9 @@ export function RiderScreen({ session, supabase, topInset = 0, bottomInset = 0 }
   const riderId = session?.user?.id || '';
   const isVerified = profile?.verification_status === 'verified';
   const isRejected = profile?.verification_status === 'rejected';
-  const isOnline = Boolean(profile?.is_online);
   const earnings = useMemo(
-    () => activeOrders.reduce((sum, order) => sum + Number(order.delivery_fee || 0), 0),
-    [activeOrders],
+    () => completedOrders.reduce((sum, order) => sum + Number(order.delivery_fee || 0), 0),
+    [completedOrders],
   );
 
   const loadRiderData = useCallback(async ({ quiet = false } = {}) => {
@@ -259,6 +258,7 @@ export function RiderScreen({ session, supabase, topInset = 0, bottomInset = 0 }
     } else {
       setAvailableJobs(jobsData?.availableJobs || []);
       setActiveOrders(jobsData?.activeOrders || []);
+      setCompletedOrders(jobsData?.completedOrders || []);
     }
 
     setLoading(false);
@@ -292,9 +292,9 @@ export function RiderScreen({ session, supabase, topInset = 0, bottomInset = 0 }
     );
   }, [isVerified, loadRiderData, supabase]);
 
-  // Auto-refresh every 10 seconds when online
+  // Auto-refresh every 10 seconds while approved.
   useEffect(() => {
-    if (!supabase || !isVerified || !isOnline) {
+    if (!supabase || !isVerified) {
       return undefined;
     }
 
@@ -303,10 +303,10 @@ export function RiderScreen({ session, supabase, topInset = 0, bottomInset = 0 }
     }, 10000);
 
     return () => clearInterval(timer);
-  }, [isVerified, isOnline, loadRiderData, supabase]);
+  }, [isVerified, loadRiderData, supabase]);
 
   useEffect(() => {
-    if (!supabase || !isVerified || !isOnline || !activeOrders.length) {
+    if (!supabase || !isVerified || !activeOrders.length) {
       return undefined;
     }
 
@@ -360,32 +360,7 @@ export function RiderScreen({ session, supabase, topInset = 0, bottomInset = 0 }
       cancelled = true;
       subscription?.remove?.();
     };
-  }, [activeOrders, isOnline, isVerified, loadRiderData, supabase]);
-
-  const handleToggleOnline = async () => {
-    if (!isVerified || busyKey) {
-      return;
-    }
-
-    setBusyKey('availability');
-    setMessage('');
-    setError('');
-
-    const { data, error: availabilityError } = await updateRiderAvailability(supabase, {
-      riderId,
-      isOnline: !isOnline,
-    });
-
-    if (availabilityError) {
-      setError(availabilityError.message || 'Could not update availability.');
-    } else {
-      setProfile(data);
-      setMessage(data?.is_online ? 'You are online.' : 'You are offline.');
-      await loadRiderData({ quiet: true });
-    }
-
-    setBusyKey('');
-  };
+  }, [activeOrders, isVerified, loadRiderData, supabase]);
 
   const handleClaim = async (order) => {
     if (activeOrders.length > 0) {
@@ -574,24 +549,6 @@ export function RiderScreen({ session, supabase, topInset = 0, bottomInset = 0 }
                 <Text style={styles.profileName}>{profile?.full_name || 'Rider account'}</Text>
                 <Text style={styles.profileMeta}>{profile?.vehicle_details || 'Vehicle details not set'}</Text>
               </View>
-              <Pressable
-                style={[
-                  styles.availabilityButton,
-                  isOnline && styles.availabilityButtonOn,
-                  (!isVerified || busyKey === 'availability') && styles.buttonDisabled,
-                ]}
-                onPress={handleToggleOnline}
-                disabled={!isVerified || busyKey === 'availability'}
-              >
-                <MaterialCommunityIcons
-                  name={isOnline ? 'toggle-switch' : 'toggle-switch-off-outline'}
-                  size={18}
-                  color={isOnline ? RIDER_COLORS.orangeHot : RIDER_COLORS.muted}
-                />
-                <Text style={[styles.availabilityText, isOnline && styles.availabilityTextOn]}>
-                  {isOnline ? 'Online' : 'Offline'}
-                </Text>
-              </Pressable>
             </View>
           </View>
 
@@ -674,8 +631,8 @@ export function RiderScreen({ session, supabase, topInset = 0, bottomInset = 0 }
 
           <View style={styles.metrics}>
             <Metric label="Available" value={availableJobs.length} icon="bag-handle-outline" />
-            <Metric label="Active" value={activeOrders.length} icon="navigate-outline" />
-            <Metric label="Fees" value={formatNpr(earnings)} icon="wallet-outline" />
+            <Metric label="Completed" value={completedOrders.length} icon="checkmark-done-outline" />
+            <Metric label="Earnings" value={formatNpr(earnings)} icon="wallet-outline" />
           </View>
 
           <View style={styles.sectionHead}>
@@ -703,7 +660,7 @@ export function RiderScreen({ session, supabase, topInset = 0, bottomInset = 0 }
           </View>
 
           <View style={styles.listPanel}>
-            {availableJobs.length && isOnline ? (
+            {availableJobs.length ? (
               availableJobs.map((order) => (
                 <OrderCard
                   key={order.id}
@@ -714,9 +671,7 @@ export function RiderScreen({ session, supabase, topInset = 0, bottomInset = 0 }
                 />
               ))
             ) : (
-              <Text style={styles.emptyText}>
-                {isOnline ? 'No pickup jobs available.' : 'Go online to accept pickup jobs.'}
-              </Text>
+              <Text style={styles.emptyText}>No pickup jobs available.</Text>
             )}
           </View>
         </View>

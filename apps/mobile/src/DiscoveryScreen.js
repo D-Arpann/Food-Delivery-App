@@ -987,6 +987,7 @@ export function DiscoveryScreen({
   const [logoutLoading, setLogoutLoading] = useState(false);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [checkoutMessage, setCheckoutMessage] = useState('');
+  const [activeOrderModalVisible, setActiveOrderModalVisible] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState(PAYMENT_METHOD_CASH);
   const [esewaPayment, setEsewaPayment] = useState(null);
   const [esewaProcessing, setEsewaProcessing] = useState(false);
@@ -1377,7 +1378,7 @@ export function DiscoveryScreen({
   const selectedMenuQuantity = selectedMenuItem
     ? menuSelection.quantity
     : 0;
-  const canAddFromSelectedRestaurant = true;
+  const canAddFromSelectedRestaurant = !cartRestaurant?.id || !selectedRestaurant?.id || cartRestaurant.id === selectedRestaurant.id;
   const defaultAddressEntry = useMemo(
     () => profileSettings.addresses.find((entry) => entry.id === profileSettings.defaultAddressId) || null,
     [profileSettings.addresses, profileSettings.defaultAddressId],
@@ -2089,12 +2090,14 @@ export function DiscoveryScreen({
       const currentLocation = await resolveCurrentLocationAddress('Current location');
       handleSelectDeliveryAddress(currentLocation);
       setDeliveryAddressMode('search');
+      return currentLocation;
     } catch (locationFailure) {
       const message = locationFailure.message || 'Could not access your current location.';
       setLocationError(message);
       if (activeTab === TAB_CART) {
         setCheckoutMessage(message);
       }
+      throw locationFailure;
     } finally {
       setLocationLoading(false);
     }
@@ -2231,6 +2234,7 @@ export function DiscoveryScreen({
     summary,
     deliveryFee,
     optimisticOrder,
+    checkoutPayload = null,
     temporary = false,
   }) => {
     const request = buildEsewaPaymentRequest({
@@ -2248,6 +2252,7 @@ export function DiscoveryScreen({
       transactionUuid,
       temporary,
       optimisticOrder,
+      checkoutPayload,
       request,
       html: buildEsewaAutoPostHtml(request.paymentUrl, request.fields),
     });
@@ -2297,9 +2302,28 @@ export function DiscoveryScreen({
       }
 
       const paymentStatus = mapEsewaStatusToPaymentStatus(response.status);
-      if (currentPayment.orderId && !currentPayment.temporary) {
+      if (paymentStatus !== 'paid') {
+        setEsewaPayment(null);
+        setEsewaProcessing(false);
+        setCheckoutMessage('Payment was not completed. Please try again.');
+        return;
+      }
+
+      let createdOrder = null;
+      if (currentPayment.checkoutPayload && !currentPayment.temporary) {
+        const { data: orderData, error: createError } = await createCheckoutOrder(supabase, currentPayment.checkoutPayload);
+
+        if (createError) {
+          throw createError;
+        }
+
+        createdOrder = orderData;
+      }
+
+      const paidOrderId = createdOrder?.orderId || currentPayment.orderId;
+      if (paidOrderId && !currentPayment.temporary) {
         const { error: paymentError } = await updateOrderPaymentStatus(supabase, {
-          orderId: currentPayment.orderId,
+          orderId: paidOrderId,
           paymentStatus,
           paymentMethod: PAYMENT_METHOD_ESEWA,
           paymentProvider: 'esewa',
@@ -2318,21 +2342,17 @@ export function DiscoveryScreen({
       setEsewaPayment(null);
       setEsewaProcessing(false);
 
-      if (paymentStatus === 'paid') {
-        finalizeSuccessfulOrder(
-          currentPayment.optimisticOrder
-            ? {
-              ...currentPayment.optimisticOrder,
-              payment_status: 'paid',
-              payment_method: PAYMENT_METHOD_ESEWA,
-            }
-            : null,
-          'Order placed.',
-        );
-        return;
-      }
-
-      setCheckoutMessage('Payment was not completed. Please try again.');
+      finalizeSuccessfulOrder(
+        currentPayment.optimisticOrder
+          ? {
+            ...currentPayment.optimisticOrder,
+            id: paidOrderId || currentPayment.optimisticOrder.id,
+            payment_status: 'paid',
+            payment_method: PAYMENT_METHOD_ESEWA,
+          }
+          : null,
+        'Order placed.',
+      );
     } catch (paymentError) {
       setEsewaPayment(null);
       setEsewaProcessing(false);
@@ -2380,6 +2400,12 @@ export function DiscoveryScreen({
       return;
     }
 
+    if (currentOrderPreview) {
+      setActiveOrderModalVisible(true);
+      setCheckoutMessage('Finish your active order before placing another.');
+      return;
+    }
+
     if (!hasValidAddress) {
       setCheckoutMessage('Please enter a complete delivery address.');
       return;
@@ -2393,17 +2419,18 @@ export function DiscoveryScreen({
     const isMultiRestaurantCart = cartGroups.length > 1;
     const transactionUuid = createEsewaTransactionUuid(cartGroups[0]?.restaurant?.id || 'cart');
 
-    if (isMultiRestaurantCart && paymentMethod === PAYMENT_METHOD_ESEWA) {
-      setCheckoutMessage('eSewa checkout needs one restaurant per payment. Use cash for multi-restaurant checkout.');
+    if (isMultiRestaurantCart) {
+      setCheckoutMessage('Order from one restaurant at a time. Clear your cart before adding items from another restaurant.');
       setCheckoutLoading(false);
       return;
     }
 
-    if (session?.isTemporaryAuth) {
+    if (paymentMethod === PAYMENT_METHOD_ESEWA) {
       const createdAt = new Date().toISOString();
+      const checkoutGroup = cartGroups[0];
       const optimisticOrder = createOptimisticOrderRecord({
-        orderId: `temp-${Date.now()}`,
-        restaurant: isMultiRestaurantCart ? { name: `${cartGroups.length} restaurants` } : cartGroups[0].restaurant,
+        orderId: `esewa-${Date.now()}`,
+        restaurant: checkoutGroup.restaurant,
         items: cartItems,
         subtotal: summary.subtotal,
         deliveryFee: summary.deliveryFee,
@@ -2415,19 +2442,46 @@ export function DiscoveryScreen({
         paymentMethod,
       });
 
-      if (paymentMethod === PAYMENT_METHOD_ESEWA) {
-        openEsewaPayment({
-          orderId: optimisticOrder.id,
-          transactionUuid,
-          summary,
-          deliveryFee,
-          optimisticOrder,
-          temporary: true,
-        });
-        setCheckoutMessage('Complete eSewa to place this order.');
-        setCheckoutLoading(false);
-        return;
-      }
+      openEsewaPayment({
+        transactionUuid,
+        summary,
+        deliveryFee,
+        optimisticOrder,
+        temporary: Boolean(session?.isTemporaryAuth),
+        checkoutPayload: session?.isTemporaryAuth ? null : {
+          customerId: session?.user?.id,
+          restaurantId: checkoutGroup.restaurant.id,
+          deliveryAddress: normalizedAddress,
+          deliveryLocation: deliveryLocation || defaultAddressEntry,
+          deliveryFee: checkoutGroup.deliveryFee,
+          paymentMethod: PAYMENT_METHOD_ESEWA,
+          paymentProvider: 'esewa',
+          paymentReference: transactionUuid,
+          paymentIntentId: transactionUuid,
+          paymentMetadata: { gateway: 'esewa', sandbox: true, transactionUuid },
+          cartItems: checkoutGroup.items,
+        },
+      });
+      setCheckoutMessage('Complete eSewa to place this order.');
+      setCheckoutLoading(false);
+      return;
+    }
+
+    if (session?.isTemporaryAuth) {
+      const createdAt = new Date().toISOString();
+      const optimisticOrder = createOptimisticOrderRecord({
+        orderId: `temp-${Date.now()}`,
+        restaurant: cartGroups[0].restaurant,
+        items: cartItems,
+        subtotal: summary.subtotal,
+        deliveryFee: summary.deliveryFee,
+        totalAmount: summary.total,
+        createdAt,
+        deliveryAddress: normalizedAddress,
+        deliveryLocation: deliveryLocation || defaultAddressEntry,
+        paymentStatus: 'pending',
+        paymentMethod,
+      });
 
       setLocalOrders((current) => mergeOrderRecords([optimisticOrder], current));
       setCheckoutMessage(`Temporary login mode: simulated order (${summary.itemCount} items).`);
@@ -2472,7 +2526,7 @@ export function DiscoveryScreen({
       const shortOrderId = checkoutResults[0]?.orderId ? String(checkoutResults[0].orderId).slice(0, 8) : '';
       const optimisticOrder = createOptimisticOrderRecord({
         orderId: checkoutResults.map((result) => result.orderId).filter(Boolean).join(', ') || `order-${Date.now()}`,
-        restaurant: isMultiRestaurantCart ? { name: `${cartGroups.length} restaurants` } : cartGroups[0].restaurant,
+        restaurant: cartGroups[0].restaurant,
         items: cartItems,
         subtotal: checkoutResults.reduce((sum, result) => sum + (result.subtotal || 0), 0) || cartSummary.subtotal,
         deliveryFee: checkoutResults.reduce((sum, result) => sum + (result.deliveryFee || 0), 0) || deliveryFee,
@@ -2483,19 +2537,6 @@ export function DiscoveryScreen({
         paymentStatus: 'pending',
         paymentMethod,
       });
-
-      if (paymentMethod === PAYMENT_METHOD_ESEWA) {
-        openEsewaPayment({
-          orderId: checkoutResults[0]?.orderId,
-          transactionUuid,
-          summary,
-          deliveryFee,
-          optimisticOrder,
-        });
-        setCheckoutMessage('Complete eSewa to place this order.');
-        setCheckoutLoading(false);
-        return;
-      }
 
       setLocalOrders((current) => mergeOrderRecords([optimisticOrder], current));
       setCheckoutMessage(`Order placed successfully${shortOrderId ? ` (#${shortOrderId})` : ''}.`);
@@ -2593,7 +2634,7 @@ export function DiscoveryScreen({
               <View style={styles.menuFoodList}>
                 {selectedMenuItems.map((item) => {
                   const cartQuantity = cartItems.find((cartItem) => cartItem.id === item.id)?.quantity || 0;
-                  const canAddItem = true;
+                  const canAddItem = !cartRestaurant?.id || !selectedRestaurant?.id || cartRestaurant.id === selectedRestaurant.id;
 
                   return (
                     <MenuFoodCard
@@ -3724,6 +3765,43 @@ export function DiscoveryScreen({
               style={styles.esewaWebView}
             />
           ) : null}
+        </View>
+      </Modal>
+
+      <Modal
+        visible={activeOrderModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setActiveOrderModalVisible(false)}
+      >
+        <View style={styles.locationModalOverlay}>
+          <View style={styles.locationModalCard}>
+            <View style={styles.locationModalIcon}>
+              <Ionicons name="receipt-outline" size={24} color={COLORS.white} />
+            </View>
+            <Text style={styles.locationModalTitle}>Active order in progress</Text>
+            <Text style={styles.locationModalSubtitle}>
+              Finish your current order before placing another.
+            </Text>
+            <Pressable
+              style={styles.locationPrimaryButton}
+              onPress={() => {
+                setActiveOrderModalVisible(false);
+                setOrderView(ORDER_VIEW_CURRENT);
+                setActiveTab(TAB_ORDERS);
+              }}
+            >
+              <Ionicons name="navigate-outline" size={18} color={COLORS.white} />
+              <Text style={styles.locationPrimaryButtonText}>View current order</Text>
+            </Pressable>
+            <Pressable
+              style={styles.locationSecondaryButton}
+              onPress={() => setActiveOrderModalVisible(false)}
+            >
+              <Ionicons name="restaurant-outline" size={18} color={COLORS.ink} />
+              <Text style={styles.locationSecondaryButtonText}>Keep browsing</Text>
+            </Pressable>
+          </View>
         </View>
       </Modal>
 

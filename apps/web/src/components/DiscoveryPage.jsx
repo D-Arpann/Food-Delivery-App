@@ -778,6 +778,7 @@ export default function DiscoveryPage({ session, supabase, onBack, onLogout }) {
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [checkoutMessage, setCheckoutMessage] = useState('');
   const [checkoutSuccess, setCheckoutSuccess] = useState(null);
+  const [activeOrderDialogOpen, setActiveOrderDialogOpen] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState(PAYMENT_METHOD_CASH);
   const [profileSettings, setProfileSettings] = useState(sessionProfileSettings);
   const [profileForm, setProfileForm] = useState({
@@ -813,6 +814,7 @@ export default function DiscoveryPage({ session, supabase, onBack, onLogout }) {
   const [locationError, setLocationError] = useState('');
 
   const {
+    restaurant: cartRestaurant,
     items: cartItems,
     groups: cartGroups,
     notice: cartNotice,
@@ -974,9 +976,31 @@ export default function DiscoveryPage({ session, supabase, onBack, onLogout }) {
         }
 
         const nextPaymentStatus = mapEsewaStatusToPaymentStatus(response.status);
-        if (pendingPayment.orderId && !pendingPayment.temporary) {
+        let paidOrder = null;
+
+        if (nextPaymentStatus !== 'paid') {
+          if (active) {
+            clearPendingEsewaPayment();
+            clearEsewaReturnParams();
+            setCheckoutMessage(`eSewa returned ${response.status || 'an incomplete status'}. No order was placed.`);
+          }
+          return;
+        }
+
+        if (pendingPayment.checkoutPayload && !pendingPayment.temporary) {
+          const { data: createdOrder, error: createError } = await createCheckoutOrder(supabase, pendingPayment.checkoutPayload);
+
+          if (createError) {
+            throw createError;
+          }
+
+          paidOrder = createdOrder;
+        }
+
+        const paidOrderId = paidOrder?.orderId || pendingPayment.orderId;
+        if (paidOrderId && !pendingPayment.temporary) {
           const { error: paymentError } = await updateOrderPaymentStatus(supabase, {
-            orderId: pendingPayment.orderId,
+            orderId: paidOrderId,
             paymentStatus: nextPaymentStatus,
             paymentMethod: PAYMENT_METHOD_ESEWA,
             paymentProvider: 'esewa',
@@ -998,13 +1022,10 @@ export default function DiscoveryPage({ session, supabase, onBack, onLogout }) {
           clearCart();
           setCheckoutSuccess({
             ...pendingPayment.orderSummary,
+            orderId: paidOrderId || pendingPayment.orderSummary?.orderId,
             paymentStatus: nextPaymentStatus,
           });
-          setCheckoutMessage(
-            nextPaymentStatus === 'paid'
-              ? 'eSewa payment complete. Order placed successfully.'
-              : `eSewa returned ${response.status || 'an incomplete status'}.`,
-          );
+          setCheckoutMessage('eSewa payment complete. Order placed successfully.');
         }
       } catch (paymentError) {
         if (active) {
@@ -1209,7 +1230,7 @@ export default function DiscoveryPage({ session, supabase, onBack, onLogout }) {
     }, {});
   }, [cartItems]);
 
-  const canAddFromActiveRestaurant = true;
+  const canAddFromActiveRestaurant = !cartRestaurant?.id || !activeRestaurant?.id || cartRestaurant.id === activeRestaurant.id;
   const temporaryOrders = useMemo(() => {
     if (!checkoutSuccess) {
       return [];
@@ -1443,6 +1464,11 @@ export default function DiscoveryPage({ session, supabase, onBack, onLogout }) {
       return;
     }
 
+    if (cartRestaurant?.id && cartRestaurant.id !== restaurant.id) {
+      incrementItem(restaurant, item);
+      return;
+    }
+
     const nextQuantity = (menuQuantityMap[item.id] || 0) + 1;
     const itemPrice = Number(item.price || 0);
     const nextSubtotal = checkoutSummary.subtotal + itemPrice;
@@ -1486,9 +1512,7 @@ export default function DiscoveryPage({ session, supabase, onBack, onLogout }) {
     }
 
     if (hasBlockingCurrentOrder) {
-      setCartView('orders');
-      setOrderView('current');
-      navigateDiscoveryScreen(DISCOVERY_SCREEN.CART);
+      setActiveOrderDialogOpen(true);
       setCheckoutMessage('Finish your ongoing order before placing another.');
       return;
     }
@@ -1506,7 +1530,7 @@ export default function DiscoveryPage({ session, supabase, onBack, onLogout }) {
       subtotal: checkoutSummary.subtotal,
       deliveryFee: checkoutDeliveryFee,
       totalAmount: checkoutSummary.total,
-      restaurantName: isMultiRestaurantCart ? `${cartGroups.length} restaurants` : cartGroups[0]?.restaurant?.name || '',
+      restaurantName: cartGroups[0]?.restaurant?.name || '',
       deliveryAddress: normalizedAddress,
       lineItems: cartItems,
     };
@@ -1515,13 +1539,49 @@ export default function DiscoveryPage({ session, supabase, onBack, onLogout }) {
     setCheckoutMessage('');
     setCheckoutSuccess(null);
 
-    if (isTemporaryAuth) {
-      if (paymentMethod === PAYMENT_METHOD_ESEWA) {
-        setCheckoutMessage('eSewa checkout needs one restaurant per payment. Use cash for multi-restaurant checkout.');
-        setCheckoutLoading(false);
-        return;
-      }
+    if (isMultiRestaurantCart) {
+      setCheckoutMessage('Order from one restaurant at a time. Clear your cart before adding items from another restaurant.');
+      setCheckoutLoading(false);
+      return;
+    }
 
+    const checkoutGroup = cartGroups[0];
+
+    if (paymentMethod === PAYMENT_METHOD_ESEWA) {
+      const request = buildEsewaPaymentRequest({
+        subtotal: orderSummary.subtotal,
+        deliveryFee: orderSummary.deliveryFee,
+        totalAmount: orderSummary.totalAmount,
+        transactionUuid,
+        successUrl: buildEsewaReturnUrl('esewa-success'),
+        failureUrl: buildEsewaReturnUrl('esewa-failure'),
+      });
+
+      writePendingEsewaPayment({
+        temporary: isTemporaryAuth,
+        transactionUuid,
+        orderSummary,
+        checkoutPayload: isTemporaryAuth ? null : {
+          customerId: session?.user?.id,
+          restaurantId: checkoutGroup.restaurant.id,
+          deliveryAddress: normalizedAddress,
+          deliveryLocation: deliveryLocation || defaultAddressEntry,
+          deliveryFee: checkoutGroup.deliveryFee,
+          paymentMethod: PAYMENT_METHOD_ESEWA,
+          paymentProvider: 'esewa',
+          paymentReference: transactionUuid,
+          paymentIntentId: transactionUuid,
+          paymentMetadata: { gateway: 'esewa', sandbox: true, transactionUuid },
+          cartItems: checkoutGroup.items,
+        },
+      });
+      setCheckoutMessage('Redirecting to eSewa sandbox...');
+      setCheckoutLoading(false);
+      submitEsewaPostForm(request.paymentUrl, request.fields);
+      return;
+    }
+
+    if (isTemporaryAuth) {
       setCheckoutSuccess({
         orderId: `temp-${cartGroups.map((group) => group.restaurant.id).join('-')}`,
         ...orderSummary,
@@ -1530,12 +1590,6 @@ export default function DiscoveryPage({ session, supabase, onBack, onLogout }) {
       setCartView('orders');
       setOrderView('current');
       clearCart();
-      setCheckoutLoading(false);
-      return;
-    }
-
-    if (isMultiRestaurantCart && paymentMethod === PAYMENT_METHOD_ESEWA) {
-      setCheckoutMessage('eSewa checkout needs one restaurant per payment. Use cash for multi-restaurant checkout.');
       setCheckoutLoading(false);
       return;
     }
@@ -1579,26 +1633,6 @@ export default function DiscoveryPage({ session, supabase, onBack, onLogout }) {
         deliveryFee: checkoutResults.reduce((sum, result) => sum + (result.deliveryFee || 0), 0) || orderSummary.deliveryFee,
         totalAmount: checkoutResults.reduce((sum, result) => sum + (result.totalAmount || 0), 0) || orderSummary.totalAmount,
       };
-
-      if (paymentMethod === PAYMENT_METHOD_ESEWA) {
-        const request = buildEsewaPaymentRequest({
-          subtotal: nextOrderSummary.subtotal,
-          deliveryFee: nextOrderSummary.deliveryFee,
-          totalAmount: nextOrderSummary.totalAmount,
-          transactionUuid,
-          successUrl: buildEsewaReturnUrl('esewa-success'),
-          failureUrl: buildEsewaReturnUrl('esewa-failure'),
-        });
-
-        writePendingEsewaPayment({
-          orderId: nextOrderSummary.orderId,
-          transactionUuid,
-          orderSummary: nextOrderSummary,
-        });
-        setCheckoutMessage('Redirecting to eSewa sandbox...');
-        submitEsewaPostForm(request.paymentUrl, request.fields);
-        return;
-      }
 
       setCheckoutSuccess(nextOrderSummary);
       setCheckoutMessage('');
@@ -3137,6 +3171,54 @@ export default function DiscoveryPage({ session, supabase, onBack, onLogout }) {
             View cart
           </button>
         </aside>
+      ) : null}
+
+      {activeOrderDialogOpen ? (
+        <div className="discover-modal-backdrop" role="presentation">
+          <section
+            className="discover-active-order-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="active-order-title"
+          >
+            <button
+              type="button"
+              className="discover-active-order-close"
+              onClick={() => setActiveOrderDialogOpen(false)}
+              aria-label="Close active order warning"
+            >
+              &times;
+            </button>
+            <div className="discover-active-order-icon">
+              <IconClock />
+            </div>
+            <h3 id="active-order-title">You have an active order</h3>
+            <p>
+              Finish your current order from {currentOrderRestaurantName} before placing another.
+            </p>
+            <div className="discover-active-order-actions">
+              <button
+                type="button"
+                className="discover-active-order-primary"
+                onClick={() => {
+                  setActiveOrderDialogOpen(false);
+                  setCartView('orders');
+                  setOrderView('current');
+                  navigateDiscoveryScreen(DISCOVERY_SCREEN.CART);
+                }}
+              >
+                View order
+              </button>
+              <button
+                type="button"
+                className="discover-active-order-secondary"
+                onClick={() => setActiveOrderDialogOpen(false)}
+              >
+                Keep browsing
+              </button>
+            </div>
+          </section>
+        </div>
       ) : null}
     </main>
   );
