@@ -52,6 +52,21 @@ const CUSTOMER_SETTINGS_LEGACY_RIDER_SELECT =
   'id, full_name, email, phone, role, avatar_url, verification_status, is_online, vehicle_details, bike_model, bike_condition, license_front_url, license_back_url, rejection_reason';
 const CUSTOMER_SETTINGS_BASE_SELECT =
   'id, full_name, email, phone, role, avatar_url, verification_status, is_online, vehicle_details, rejection_reason';
+const PROFILE_VERIFICATION_STATUSES = new Set(['pending', 'verified', 'suspended']);
+
+function normalizeProfileVerificationStatus(value, fallback = '') {
+  const normalized = String(value || '').trim().toLowerCase();
+
+  if (PROFILE_VERIFICATION_STATUSES.has(normalized)) {
+    return normalized;
+  }
+
+  if (normalized === 'rejected') {
+    return 'pending';
+  }
+
+  return fallback;
+}
 
 function isSeededLoginPhone(phone) {
   const phoneDigits = onlyDigits(phone).slice(-10);
@@ -79,7 +94,7 @@ function getTrustedAuthProfile(authData, phone) {
     phone: normalizeAppPhone(phone || userMetadata.phone || user.phone),
     role,
     avatar_url: userMetadata.avatar_url || null,
-    verification_status: appMetadata.verification_status || 'verified',
+    verification_status: normalizeProfileVerificationStatus(appMetadata.verification_status, 'verified'),
     is_online: false,
     vehicle_details: null,
   };
@@ -330,9 +345,10 @@ export async function upsertCurrentUserProfile(client, profileInput = {}) {
     profilePayload.avatar_url = avatarUrl;
   }
 
-  const verificationStatus =
-    profileInput.verification_status ||
-    existingProfile?.verification_status;
+  const hasVerificationStatusInput = Object.hasOwn(profileInput, 'verification_status');
+  const verificationStatus = hasVerificationStatusInput
+    ? normalizeProfileVerificationStatus(profileInput.verification_status)
+    : undefined;
 
   if (verificationStatus) {
     profilePayload.verification_status = verificationStatus;
@@ -639,10 +655,15 @@ export async function updateCustomerSettings(client, payload = {}) {
       resolvedDefaultAddressId,
       user.user_metadata?.address || 'Naxal, Kathmandu',
     );
+    const {
+      verification_status: _staleUserVerificationStatus,
+      verificationStatus: _staleUserVerificationStatusCamel,
+      ...safeUserMetadata
+    } = user.user_metadata || {};
 
     const nextAuthPayload = {
       data: {
-        ...user.user_metadata,
+        ...safeUserMetadata,
         full_name: resolvedFullName,
         username: resolvedUsername,
         phone: resolvedPhone,

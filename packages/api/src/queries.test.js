@@ -288,6 +288,10 @@ describe('admin application rejection', () => {
       forwardMigrations,
       /ALTER TABLE public\.restaurants\s+ADD COLUMN IF NOT EXISTS rejection_reason TEXT/i,
     );
+    assert.match(
+      forwardMigrations,
+      /ALTER TYPE public\.verification_status\s+ADD VALUE IF NOT EXISTS 'rejected'/i,
+    );
   });
 
   it('stores a rejection reason for restaurant applications', async () => {
@@ -322,6 +326,43 @@ describe('admin application rejection', () => {
     const update = store.updates.find((entry) => entry.table === 'user_profiles');
     assert.equal(update.payload.verification_status, 'rejected');
     assert.equal(update.payload.rejection_reason, 'License back image is unreadable.');
+  });
+});
+
+describe('rider location SQL', () => {
+  it('keeps rider location RPC column references unambiguous', () => {
+    const migrationsDir = resolve(process.cwd(), 'supabase/migrations');
+    const wipeSql = readFileSync(resolve(migrationsDir, '000_wipe_database.sql'), 'utf8');
+    const setupSql = readFileSync(resolve(migrationsDir, '001_insert_mock_data.sql'), 'utf8');
+
+    for (const sql of [wipeSql, setupSql]) {
+      assert.match(sql, /CREATE OR REPLACE FUNCTION public\.update_rider_location/i);
+      assert.match(sql, /#variable_conflict use_column/i);
+      assert.match(sql, /FROM public\.customer_orders AS co/i);
+      assert.match(sql, /AND co\.rider_id = current_rider_id/i);
+      assert.doesNotMatch(sql, /AND\s+rider_id\s*=\s*current_rider_id/i);
+    }
+  });
+});
+
+describe('seed auth SQL', () => {
+  it('archives stale auth users before inserting canonical seeded phone accounts', () => {
+    const setupSql = readFileSync(
+      resolve(process.cwd(), 'supabase/migrations/001_insert_mock_data.sql'),
+      'utf8',
+    );
+
+    assert.match(setupSql, /DROP FUNCTION IF EXISTS public\.sync_login_profile\(\)/i);
+    assert.match(setupSql, /DROP FUNCTION IF EXISTS private\.sync_login_profile\(\)/i);
+    assert.match(setupSql, /CREATE TEMP TABLE seeded_auth_user_map ON COMMIT DROP AS/i);
+    assert.match(setupSql, /CREATE TEMP TABLE seeded_profile_map ON COMMIT DROP AS/i);
+    assert.doesNotMatch(setupSql, /private\.seeded_(?:auth_user|profile|orphan_phone_auth|owner_profile)_map/i);
+    assert.doesNotMatch(setupSql, /pg_temp\./i);
+    assert.match(setupSql, /REGEXP_REPLACE\(COALESCE\(u\.phone, ''\), '\\D', '', 'g'\) = s\.seed_phone/i);
+    assert.match(setupSql, /UPDATE auth\.users u\s+SET\s+email = 'archived-' \|\| u\.id::TEXT/i);
+    assert.match(setupSql, /phone = NULL/i);
+    assert.match(setupSql, /stale_real_auth_users AS/i);
+    assert.match(setupSql, /archived_real_auth_users AS/i);
   });
 });
 

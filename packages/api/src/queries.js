@@ -1605,16 +1605,24 @@ export async function fetchRiderJobs(client, options = {}) {
         ORDER_STATUS.ARRIVED,
       ])
       .order('updated_at', { ascending: false });
+    let completedOrdersQuery = client
+      .from(TABLES.CUSTOMER_ORDERS)
+      .select(RIDER_ORDER_SELECT)
+      .eq('rider_id', targetRiderId)
+      .eq('status', ORDER_STATUS.DELIVERED)
+      .order('updated_at', { ascending: false });
 
     if (limit > 0) {
       availableJobsQuery = availableJobsQuery.limit(limit);
       activeOrdersQuery = activeOrdersQuery.limit(limit);
+      completedOrdersQuery = completedOrdersQuery.limit(200);
     }
 
     const [
       { data: availableJobs, error: availableJobsError },
       { data: activeOrders, error: activeOrdersError },
-    ] = await Promise.all([availableJobsQuery, activeOrdersQuery]);
+      { data: completedOrders, error: completedOrdersError },
+    ] = await Promise.all([availableJobsQuery, activeOrdersQuery, completedOrdersQuery]);
 
     if (availableJobsError) {
       throw availableJobsError;
@@ -1624,7 +1632,11 @@ export async function fetchRiderJobs(client, options = {}) {
       throw activeOrdersError;
     }
 
-    const allOrders = [...(availableJobs || []), ...(activeOrders || [])];
+    if (completedOrdersError) {
+      throw completedOrdersError;
+    }
+
+    const allOrders = [...(availableJobs || []), ...(activeOrders || []), ...(completedOrders || [])];
     const enrichedOrders = await enrichRiderOrders(client, allOrders);
     const enrichedById = mapById(enrichedOrders);
 
@@ -1632,6 +1644,7 @@ export async function fetchRiderJobs(client, options = {}) {
       data: {
         availableJobs: (availableJobs || []).map((order) => enrichedById[order.id]).filter(Boolean),
         activeOrders: (activeOrders || []).map((order) => enrichedById[order.id]).filter(Boolean),
+        completedOrders: (completedOrders || []).map((order) => enrichedById[order.id]).filter(Boolean),
       },
       error: null,
     };

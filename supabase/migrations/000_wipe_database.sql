@@ -1234,6 +1234,7 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public
 AS $$
+#variable_conflict use_column
 DECLARE
   target_order public.customer_orders%ROWTYPE;
   current_rider_id UUID := auth.uid();
@@ -1253,16 +1254,16 @@ BEGIN
 
   SELECT *
   INTO target_order
-  FROM public.customer_orders
-  WHERE customer_orders.id = p_order_id
-    AND customer_orders.rider_id = current_rider_id
-    AND customer_orders.status IN ('ready_for_pickup', 'picked_up', 'arrived');
+  FROM public.customer_orders AS co
+  WHERE co.id = p_order_id
+    AND co.rider_id = current_rider_id
+    AND co.status IN ('ready_for_pickup', 'picked_up', 'arrived');
 
   IF target_order.id IS NULL THEN
     RAISE EXCEPTION 'Active rider order not found.' USING ERRCODE = 'P0002';
   END IF;
 
-  INSERT INTO public.rider_locations (
+  INSERT INTO public.rider_locations AS rl (
     rider_id,
     active_order_id,
     latitude,
@@ -1292,7 +1293,7 @@ BEGIN
     accuracy_m = EXCLUDED.accuracy_m,
     updated_at = EXCLUDED.updated_at;
 
-  UPDATE public.customer_orders
+  UPDATE public.customer_orders AS co
   SET
     rider_lat = p_latitude,
     rider_lng = p_longitude,
@@ -1301,16 +1302,16 @@ BEGIN
     rider_accuracy_m = p_accuracy_m,
     rider_location_updated_at = location_time,
     updated_at = location_time
-  WHERE customer_orders.id = p_order_id
-    AND customer_orders.rider_id = current_rider_id;
+  WHERE co.id = p_order_id
+    AND co.rider_id = current_rider_id;
 
   RETURN QUERY
   SELECT
-    p_order_id,
-    current_rider_id,
-    p_latitude,
-    p_longitude,
-    location_time;
+    p_order_id AS order_id,
+    current_rider_id AS rider_id,
+    p_latitude AS latitude,
+    p_longitude AS longitude,
+    location_time AS updated_at;
 END;
 $$;
 

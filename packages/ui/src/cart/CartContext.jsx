@@ -42,6 +42,18 @@ function reduceCart(state, action) {
         return state;
       }
 
+      if (
+        Number(quantity) > 0 &&
+        state.items.length > 0 &&
+        state.restaurant?.id &&
+        state.restaurant.id !== restaurant.id
+      ) {
+        return {
+          ...state,
+          notice: `Your cart already has items from ${state.restaurant.name || 'another restaurant'}. Clear it before ordering from ${restaurant.name || 'a different restaurant'}.`,
+        };
+      }
+
       const cartItem = {
         ...item,
         restaurantId: restaurant.id,

@@ -9,7 +9,443 @@
 -- Rider phone: 9800000200
 -- ==========================================
 
+ALTER TYPE public.verification_status ADD VALUE IF NOT EXISTS 'rejected';
+
 CREATE SCHEMA IF NOT EXISTS private;
+
+ALTER TABLE public.restaurants
+ADD COLUMN IF NOT EXISTS rejection_reason TEXT;
+
+ALTER TABLE public.user_profiles
+ADD COLUMN IF NOT EXISTS rejection_reason TEXT;
+
+ALTER TABLE public.user_profiles
+ADD COLUMN IF NOT EXISTS vehicle_type TEXT,
+ADD COLUMN IF NOT EXISTS vehicle_details TEXT,
+ADD COLUMN IF NOT EXISTS bike_model TEXT,
+ADD COLUMN IF NOT EXISTS bike_condition TEXT,
+ADD COLUMN IF NOT EXISTS license_front_url TEXT,
+ADD COLUMN IF NOT EXISTS license_back_url TEXT;
+
+ALTER TABLE public.user_profiles
+DROP CONSTRAINT IF EXISTS user_profiles_vehicle_type_check;
+
+ALTER TABLE public.user_profiles
+ADD CONSTRAINT user_profiles_vehicle_type_check
+CHECK (vehicle_type IS NULL OR vehicle_type IN ('bicycle', 'motorbike', 'scooter'));
+
+UPDATE public.user_profiles
+SET vehicle_type = 'motorbike'
+WHERE vehicle_type IS NULL
+  AND role = 'rider'
+  AND (
+    COALESCE(NULLIF(vehicle_details, ''), '') <> ''
+    OR COALESCE(NULLIF(bike_model, ''), '') <> ''
+    OR COALESCE(NULLIF(license_front_url, ''), '') <> ''
+    OR COALESCE(NULLIF(license_back_url, ''), '') <> ''
+  );
+
+CREATE OR REPLACE FUNCTION public.protect_profile_admin_fields()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+DECLARE
+  is_rider_application BOOLEAN;
+BEGIN
+  IF auth.uid() = NEW.id AND NOT public.current_user_is_admin() THEN
+    is_rider_application :=
+      OLD.role IN ('customer', 'rider')
+      AND OLD.verification_status IN ('verified', 'pending', 'rejected')
+      AND NEW.role = 'rider'
+      AND NEW.verification_status = 'pending'
+      AND NEW.vehicle_type IN ('bicycle', 'motorbike', 'scooter')
+      AND (
+        NEW.vehicle_type = 'bicycle'
+        OR (
+          COALESCE(NULLIF(NEW.bike_model, ''), '') <> ''
+          AND COALESCE(NULLIF(NEW.bike_condition, ''), '') <> ''
+          AND COALESCE(NULLIF(NEW.license_front_url, ''), '') <> ''
+          AND COALESCE(NULLIF(NEW.license_back_url, ''), '') <> ''
+        )
+      );
+
+    IF is_rider_application THEN
+      NEW.is_online = FALSE;
+      NEW.rejection_reason = NULL;
+    ELSE
+      NEW.role = OLD.role;
+      NEW.verification_status = OLD.verification_status;
+      NEW.rejection_reason = OLD.rejection_reason;
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+DROP POLICY IF EXISTS "Users insert own profile" ON public.user_profiles;
+
+CREATE POLICY "Users insert own profile"
+ON public.user_profiles FOR INSERT
+WITH CHECK (
+  auth.uid() = id
+  AND role <> 'admin'
+  AND (
+    verification_status = 'verified'
+    OR (
+      role = 'rider'
+      AND verification_status = 'pending'
+      AND vehicle_type IN ('bicycle', 'motorbike', 'scooter')
+      AND (
+        vehicle_type = 'bicycle'
+        OR (
+          COALESCE(NULLIF(bike_model, ''), '') <> ''
+          AND COALESCE(NULLIF(bike_condition, ''), '') <> ''
+          AND COALESCE(NULLIF(license_front_url, ''), '') <> ''
+          AND COALESCE(NULLIF(license_back_url, ''), '') <> ''
+        )
+      )
+    )
+  )
+);
+
+DROP FUNCTION IF EXISTS public.admin_verify_rider_application(UUID);
+
+CREATE OR REPLACE FUNCTION public.admin_verify_rider_application(p_profile_id UUID)
+RETURNS TABLE (
+  id UUID,
+  full_name TEXT,
+  email TEXT,
+  phone TEXT,
+  role public.user_role,
+  avatar_url TEXT,
+  verification_status public.verification_status,
+  is_online BOOLEAN,
+  vehicle_type TEXT,
+  vehicle_details TEXT,
+  bike_model TEXT,
+  bike_condition TEXT,
+  license_front_url TEXT,
+  license_back_url TEXT,
+  rejection_reason TEXT,
+  created_at TIMESTAMPTZ
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF NOT public.current_user_is_admin() THEN
+    RAISE EXCEPTION 'Admin access required.' USING ERRCODE = '42501';
+  END IF;
+
+  RETURN QUERY
+  UPDATE public.user_profiles p
+  SET role = 'rider',
+      verification_status = 'verified',
+      is_online = FALSE,
+      rejection_reason = NULL
+  WHERE p.id = p_profile_id
+  RETURNING
+    p.id,
+    p.full_name,
+    p.email,
+    p.phone,
+    p.role,
+    p.avatar_url,
+    p.verification_status,
+    p.is_online,
+    p.vehicle_type,
+    p.vehicle_details,
+    p.bike_model,
+    p.bike_condition,
+    p.license_front_url,
+    p.license_back_url,
+    p.rejection_reason,
+    p.created_at;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Rider application not found.' USING ERRCODE = 'P0002';
+  END IF;
+
+  UPDATE auth.users u
+  SET raw_app_meta_data = COALESCE(u.raw_app_meta_data, '{}'::jsonb)
+    || jsonb_build_object('role', 'rider', 'verification_status', 'verified')
+  WHERE u.id = p_profile_id;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.admin_verify_rider_application(UUID) TO authenticated;
+
+WITH seeded_orphan_phone_auth_map AS (
+  SELECT
+    stale.id AS stale_id,
+    canonical.id AS canonical_id
+  FROM auth.users stale
+  JOIN auth.users canonical
+    ON canonical.id <> stale.id
+    AND REGEXP_REPLACE(COALESCE(canonical.phone, ''), '\D', '', 'g') = stale.phone
+  WHERE stale.phone ~ '^977[0-9]{10}$'
+    AND COALESCE(stale.raw_app_meta_data ->> 'role', '') = ''
+    AND COALESCE(canonical.raw_app_meta_data ->> 'role', '') IN ('admin', 'restaurant_owner', 'rider', 'customer')
+    AND COALESCE(canonical.raw_app_meta_data ->> 'verification_status', '') = 'verified'
+)
+DELETE FROM auth.identities i
+USING seeded_orphan_phone_auth_map m
+WHERE i.user_id = m.stale_id
+  OR i.provider_id = m.stale_id::TEXT;
+
+WITH seeded_orphan_phone_auth_map AS (
+  SELECT
+    stale.id AS stale_id,
+    canonical.id AS canonical_id
+  FROM auth.users stale
+  JOIN auth.users canonical
+    ON canonical.id <> stale.id
+    AND REGEXP_REPLACE(COALESCE(canonical.phone, ''), '\D', '', 'g') = stale.phone
+  WHERE stale.phone ~ '^977[0-9]{10}$'
+    AND COALESCE(stale.raw_app_meta_data ->> 'role', '') = ''
+    AND COALESCE(canonical.raw_app_meta_data ->> 'role', '') IN ('admin', 'restaurant_owner', 'rider', 'customer')
+    AND COALESCE(canonical.raw_app_meta_data ->> 'verification_status', '') = 'verified'
+)
+DELETE FROM auth.users u
+USING seeded_orphan_phone_auth_map m
+WHERE u.id = m.stale_id;
+
+UPDATE auth.users
+SET
+  phone = REGEXP_REPLACE(phone, '\D', '', 'g'),
+  raw_user_meta_data = jsonb_set(
+    COALESCE(raw_user_meta_data, '{}'::jsonb),
+    '{phone}',
+    to_jsonb('+' || REGEXP_REPLACE(phone, '\D', '', 'g')),
+    TRUE
+  ),
+  updated_at = NOW()
+WHERE phone ~ '^\+977[0-9]{10}$'
+  AND NOT EXISTS (
+    SELECT 1
+    FROM auth.users existing
+    WHERE existing.id <> auth.users.id
+      AND existing.phone = REGEXP_REPLACE(auth.users.phone, '\D', '', 'g')
+  );
+
+UPDATE public.user_profiles
+SET
+  phone = '+' || phone,
+  updated_at = NOW()
+WHERE phone ~ '^977[0-9]{10}$'
+  AND NOT EXISTS (
+    SELECT 1
+    FROM public.user_profiles existing
+    WHERE existing.id <> user_profiles.id
+      AND existing.phone = '+' || user_profiles.phone
+  );
+
+UPDATE auth.identities
+SET
+  identity_data = jsonb_set(
+    COALESCE(identity_data, '{}'::jsonb),
+    '{phone}',
+    to_jsonb(REGEXP_REPLACE(identity_data ->> 'phone', '\D', '', 'g')),
+    TRUE
+  ),
+  updated_at = NOW()
+WHERE provider = 'phone'
+  AND identity_data ->> 'phone' ~ '^\+977[0-9]{10}$';
+
+DO $$
+BEGIN
+  DROP TABLE IF EXISTS seeded_owner_profile_map;
+
+  CREATE TEMP TABLE seeded_owner_profile_map AS
+  SELECT
+    p.id AS stale_id,
+    u.id AS canonical_id,
+    CASE
+      WHEN REGEXP_REPLACE(COALESCE(u.phone, ''), '\D', '', 'g') ~ '^977[0-9]{10}$'
+        THEN '+' || REGEXP_REPLACE(u.phone, '\D', '', 'g')
+      ELSE u.phone
+    END AS canonical_phone,
+    COALESCE(NULLIF(u.email, ''), p.email) AS canonical_email,
+    p.full_name,
+    p.role,
+    p.avatar_url,
+    p.verification_status,
+    p.is_online,
+    p.rejection_reason,
+    p.created_at
+  FROM public.user_profiles p
+  JOIN auth.users u
+    ON u.id <> p.id
+    AND LOWER(COALESCE(u.email, '')) = LOWER(COALESCE(p.email, ''))
+    AND REGEXP_REPLACE(COALESCE(u.phone, ''), '\D', '', 'g')
+        = REGEXP_REPLACE(COALESCE(p.phone, ''), '\D', '', 'g')
+  LEFT JOIN public.user_profiles existing
+    ON existing.id = u.id
+  WHERE existing.id IS NULL
+    AND p.role = 'restaurant_owner'
+    AND COALESCE(u.raw_app_meta_data ->> 'role', '') = 'restaurant_owner'
+    AND COALESCE(u.raw_app_meta_data ->> 'verification_status', '') = 'verified';
+
+  UPDATE public.user_profiles p
+  SET
+    email = 'archived-' || p.id::TEXT || '@chitomitho.local',
+    phone = COALESCE(p.phone, '') || '#archived-' || SUBSTRING(p.id::TEXT FROM 1 FOR 8),
+    updated_at = NOW()
+  FROM seeded_owner_profile_map m
+  WHERE p.id = m.stale_id;
+
+  INSERT INTO public.user_profiles (
+    id,
+    full_name,
+    email,
+    phone,
+    role,
+    avatar_url,
+    verification_status,
+    is_online,
+    rejection_reason,
+    created_at,
+    updated_at
+  )
+  SELECT
+    m.canonical_id,
+    m.full_name,
+    m.canonical_email,
+    m.canonical_phone,
+    m.role,
+    m.avatar_url,
+    m.verification_status,
+    m.is_online,
+    m.rejection_reason,
+    m.created_at,
+    NOW()
+  FROM seeded_owner_profile_map m
+  ON CONFLICT (id) DO NOTHING;
+
+  UPDATE public.restaurants
+  SET owner_id = m.canonical_id
+  FROM seeded_owner_profile_map m
+  WHERE restaurants.owner_id = m.stale_id;
+
+  UPDATE public.customer_orders
+  SET customer_id = m.canonical_id
+  FROM seeded_owner_profile_map m
+  WHERE customer_orders.customer_id = m.stale_id;
+
+  UPDATE public.customer_orders
+  SET rider_id = m.canonical_id
+  FROM seeded_owner_profile_map m
+  WHERE customer_orders.rider_id = m.stale_id;
+
+  UPDATE public.rider_locations
+  SET rider_id = m.canonical_id
+  FROM seeded_owner_profile_map m
+  WHERE rider_locations.rider_id = m.stale_id;
+
+  UPDATE public.user_notifications
+  SET user_id = m.canonical_id
+  FROM seeded_owner_profile_map m
+  WHERE user_notifications.user_id = m.stale_id;
+
+  UPDATE auth.users u
+  SET
+    email = m.canonical_email,
+    phone = REGEXP_REPLACE(m.canonical_phone, '\D', '', 'g'),
+    phone_confirmed_at = COALESCE(u.phone_confirmed_at, NOW()),
+    raw_app_meta_data = COALESCE(u.raw_app_meta_data, '{}'::jsonb)
+      || jsonb_build_object('role', p.role, 'verification_status', p.verification_status),
+    raw_user_meta_data = COALESCE(u.raw_user_meta_data, '{}'::jsonb)
+      || jsonb_build_object('full_name', p.full_name, 'phone', m.canonical_phone, 'email', p.email),
+    updated_at = NOW()
+  FROM seeded_owner_profile_map m
+  JOIN public.user_profiles p
+    ON p.id = m.canonical_id
+  WHERE u.id = m.canonical_id;
+
+  INSERT INTO auth.identities (
+    provider_id,
+    user_id,
+    identity_data,
+    provider,
+    last_sign_in_at,
+    created_at,
+    updated_at
+  )
+  SELECT
+    u.id::TEXT,
+    u.id,
+    jsonb_build_object(
+      'sub', u.id::TEXT,
+      'phone', u.phone,
+      'phone_verified', TRUE
+    ),
+    'phone',
+    NOW(),
+    NOW(),
+    NOW()
+  FROM auth.users u
+  JOIN seeded_owner_profile_map m
+    ON m.canonical_id = u.id
+  ON CONFLICT (provider_id, provider) DO UPDATE
+  SET
+    user_id = EXCLUDED.user_id,
+    identity_data = EXCLUDED.identity_data,
+    updated_at = NOW();
+
+  DELETE FROM public.user_profiles p
+  USING seeded_owner_profile_map m
+  WHERE p.id = m.stale_id;
+
+  DELETE FROM auth.users u
+  USING seeded_owner_profile_map m
+  WHERE u.id = m.stale_id;
+
+  DROP TABLE IF EXISTS seeded_owner_profile_map;
+END;
+$$;
+
+WITH seeded_orphan_phone_auth_map AS (
+  SELECT
+    stale.id AS stale_id,
+    canonical.id AS canonical_id
+  FROM auth.users stale
+  JOIN auth.users canonical
+    ON canonical.id <> stale.id
+    AND REGEXP_REPLACE(COALESCE(canonical.phone, ''), '\D', '', 'g')
+        = REGEXP_REPLACE(COALESCE(stale.phone, ''), '\D', '', 'g')
+  WHERE stale.phone ~ '^977[0-9]{10}$'
+    AND COALESCE(stale.raw_app_meta_data ->> 'role', '') = ''
+    AND COALESCE(canonical.raw_app_meta_data ->> 'role', '') IN ('admin', 'restaurant_owner', 'rider', 'customer')
+    AND COALESCE(canonical.raw_app_meta_data ->> 'verification_status', '') = 'verified'
+)
+DELETE FROM auth.identities i
+USING seeded_orphan_phone_auth_map m
+WHERE i.user_id = m.stale_id
+  OR i.provider_id = m.stale_id::TEXT;
+
+WITH seeded_orphan_phone_auth_map AS (
+  SELECT
+    stale.id AS stale_id,
+    canonical.id AS canonical_id
+  FROM auth.users stale
+  JOIN auth.users canonical
+    ON canonical.id <> stale.id
+    AND REGEXP_REPLACE(COALESCE(canonical.phone, ''), '\D', '', 'g')
+        = REGEXP_REPLACE(COALESCE(stale.phone, ''), '\D', '', 'g')
+  WHERE stale.phone ~ '^977[0-9]{10}$'
+    AND COALESCE(stale.raw_app_meta_data ->> 'role', '') = ''
+    AND COALESCE(canonical.raw_app_meta_data ->> 'role', '') IN ('admin', 'restaurant_owner', 'rider', 'customer')
+    AND COALESCE(canonical.raw_app_meta_data ->> 'verification_status', '') = 'verified'
+)
+DELETE FROM auth.users u
+USING seeded_orphan_phone_auth_map m
+WHERE u.id = m.stale_id;
+
+DROP FUNCTION IF EXISTS public.sync_login_profile();
+DROP FUNCTION IF EXISTS private.sync_login_profile();
 
 CREATE OR REPLACE FUNCTION private.sync_login_profile()
 RETURNS TABLE (
@@ -229,38 +665,55 @@ GRANT USAGE ON SCHEMA private TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION private.sync_login_profile() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.sync_login_profile() TO authenticated;
 
-DROP TABLE IF EXISTS pg_temp.seeded_profile_map;
+DO $$
+BEGIN
+  DROP TABLE IF EXISTS seeded_auth_user_map;
 
-CREATE TEMP TABLE seeded_profile_map ON COMMIT DROP AS
-WITH seeded_profiles(seed_profile_id, seed_email, seed_phone) AS (
-  VALUES
-    ('00000000-0000-4000-8000-000000000001'::uuid, 'admin@chitomitho.local', '+9779800000000'),
-    ('0b2f6b3e-6ce1-4e41-9eb5-1b7f0f11a111'::uuid, 'demo.restaurant1@chitomitho.local', '+9779800000001'),
-    ('1c3a7d4f-8df2-4b52-aec6-2c8a1a22b222'::uuid, 'demo.restaurant2@chitomitho.local', '+9779800000002'),
-    ('2d4b8e50-9ef3-4c63-bfd7-3d9b2b33c333'::uuid, 'demo.restaurant3@chitomitho.local', '+9779800000003'),
-    ('33333333-3333-4333-8333-333333333333'::uuid, 'demo.customer@chitomitho.local', '+9779800000100'),
-    ('44444444-4444-4444-8444-444444444444'::uuid, 'demo.rider@chitomitho.local', '+9779800000200')
-)
-SELECT
-  p.id AS stale_id,
-  s.seed_profile_id AS canonical_id
-FROM public.user_profiles p
-JOIN seeded_profiles s
-  ON p.id <> s.seed_profile_id
-  AND (
-    LOWER(p.email) = LOWER(s.seed_email)
-    OR RIGHT(REGEXP_REPLACE(COALESCE(p.phone, ''), '\D', '', 'g'), 10)
-       = RIGHT(REGEXP_REPLACE(s.seed_phone, '\D', '', 'g'), 10)
-  );
+  CREATE TEMP TABLE seeded_auth_user_map ON COMMIT DROP AS
+  WITH seeded_auth_users(seed_user_id, seed_email, seed_phone) AS (
+    VALUES
+      ('00000000-0000-4000-8000-000000000001'::uuid, 'admin@chitomitho.local', '9779800000000'),
+      ('0b2f6b3e-6ce1-4e41-9eb5-1b7f0f11a111'::uuid, 'demo.restaurant1@chitomitho.local', '9779800000001'),
+      ('1c3a7d4f-8df2-4b52-aec6-2c8a1a22b222'::uuid, 'demo.restaurant2@chitomitho.local', '9779800000002'),
+      ('2d4b8e50-9ef3-4c63-bfd7-3d9b2b33c333'::uuid, 'demo.restaurant3@chitomitho.local', '9779800000003'),
+      ('33333333-3333-4333-8333-333333333333'::uuid, 'demo.customer@chitomitho.local', '9779800000100'),
+      ('44444444-4444-4444-8444-444444444444'::uuid, 'demo.rider@chitomitho.local', '9779800000200')
+  )
+  SELECT DISTINCT
+    u.id AS stale_id
+  FROM auth.users u
+  JOIN seeded_auth_users s
+    ON u.id <> s.seed_user_id
+    AND (
+      LOWER(COALESCE(u.email, '')) = LOWER(s.seed_email)
+      OR REGEXP_REPLACE(COALESCE(u.phone, ''), '\D', '', 'g') = s.seed_phone
+    );
 
-UPDATE public.user_profiles p
-SET
-  email = 'archived-' || p.id::TEXT || '@chitomitho.local',
-  phone = 'archived-' || p.id::TEXT,
-  verification_status = 'suspended',
-  is_online = FALSE
-FROM pg_temp.seeded_profile_map m
-WHERE p.id = m.stale_id;
+  UPDATE auth.identities i
+  SET
+    provider_id = 'archived-' || i.user_id::TEXT,
+    identity_data = (COALESCE(i.identity_data, '{}'::jsonb) - 'phone')
+      || jsonb_build_object('archived_seed_duplicate', TRUE),
+    updated_at = NOW()
+  FROM seeded_auth_user_map m
+  WHERE i.user_id = m.stale_id
+    AND i.provider = 'phone';
+
+  UPDATE auth.users u
+  SET
+    email = 'archived-' || u.id::TEXT || '@chitomitho.local',
+    phone = NULL,
+    raw_app_meta_data = COALESCE(u.raw_app_meta_data, '{}'::jsonb)
+      || jsonb_build_object('archived_seed_duplicate', TRUE),
+    raw_user_meta_data = (COALESCE(u.raw_user_meta_data, '{}'::jsonb) - 'phone')
+      || jsonb_build_object('archived_seed_duplicate', TRUE),
+    updated_at = NOW()
+  FROM seeded_auth_user_map m
+  WHERE u.id = m.stale_id;
+
+  DROP TABLE IF EXISTS seeded_auth_user_map;
+END;
+$$;
 
 INSERT INTO auth.users (
   instance_id,
@@ -443,7 +896,42 @@ SET
   identity_data = EXCLUDED.identity_data,
   updated_at = NOW();
 
-INSERT INTO public.user_profiles (
+DO $$
+BEGIN
+  DROP TABLE IF EXISTS seeded_profile_map;
+
+  CREATE TEMP TABLE seeded_profile_map ON COMMIT DROP AS
+  WITH seeded_profiles(seed_profile_id, seed_email, seed_phone) AS (
+    VALUES
+      ('00000000-0000-4000-8000-000000000001'::uuid, 'admin@chitomitho.local', '+9779800000000'),
+      ('0b2f6b3e-6ce1-4e41-9eb5-1b7f0f11a111'::uuid, 'demo.restaurant1@chitomitho.local', '+9779800000001'),
+      ('1c3a7d4f-8df2-4b52-aec6-2c8a1a22b222'::uuid, 'demo.restaurant2@chitomitho.local', '+9779800000002'),
+      ('2d4b8e50-9ef3-4c63-bfd7-3d9b2b33c333'::uuid, 'demo.restaurant3@chitomitho.local', '+9779800000003'),
+      ('33333333-3333-4333-8333-333333333333'::uuid, 'demo.customer@chitomitho.local', '+9779800000100'),
+      ('44444444-4444-4444-8444-444444444444'::uuid, 'demo.rider@chitomitho.local', '+9779800000200')
+  )
+  SELECT
+    p.id AS stale_id,
+    s.seed_profile_id AS canonical_id
+  FROM public.user_profiles p
+  JOIN seeded_profiles s
+    ON p.id <> s.seed_profile_id
+    AND (
+      LOWER(p.email) = LOWER(s.seed_email)
+      OR RIGHT(REGEXP_REPLACE(COALESCE(p.phone, ''), '\D', '', 'g'), 10)
+         = RIGHT(REGEXP_REPLACE(s.seed_phone, '\D', '', 'g'), 10)
+    );
+
+  UPDATE public.user_profiles p
+  SET
+    email = 'archived-' || p.id::TEXT || '@chitomitho.local',
+    phone = 'archived-' || p.id::TEXT,
+    verification_status = 'suspended',
+    is_online = FALSE
+  FROM seeded_profile_map m
+  WHERE p.id = m.stale_id;
+
+  INSERT INTO public.user_profiles (
   id,
   full_name,
   email,
@@ -539,6 +1027,54 @@ SET
   is_online = EXCLUDED.is_online,
   vehicle_type = EXCLUDED.vehicle_type,
   vehicle_details = EXCLUDED.vehicle_details;
+
+  UPDATE public.customer_orders o
+  SET customer_id = m.canonical_id
+  FROM seeded_profile_map m
+  WHERE o.customer_id = m.stale_id;
+
+  UPDATE public.customer_orders o
+  SET rider_id = m.canonical_id
+  FROM seeded_profile_map m
+  WHERE o.rider_id = m.stale_id;
+
+  UPDATE public.user_notifications n
+  SET user_id = m.canonical_id
+  FROM seeded_profile_map m
+  WHERE n.user_id = m.stale_id;
+
+  DELETE FROM public.rider_locations rl
+  USING seeded_profile_map m
+  WHERE rl.rider_id = m.stale_id
+    AND EXISTS (
+      SELECT 1
+      FROM public.rider_locations existing
+      WHERE existing.rider_id = m.canonical_id
+    );
+
+  UPDATE public.rider_locations rl
+  SET rider_id = m.canonical_id
+  FROM seeded_profile_map m
+  WHERE rl.rider_id = m.stale_id;
+
+  DELETE FROM auth.users u
+  USING seeded_profile_map m
+  WHERE u.id = m.stale_id
+    AND NOT EXISTS (
+      SELECT 1 FROM public.restaurants r WHERE r.owner_id = m.stale_id
+    )
+    AND NOT EXISTS (
+      SELECT 1
+      FROM public.customer_orders o
+      WHERE o.customer_id = m.stale_id OR o.rider_id = m.stale_id
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM public.rider_locations rl WHERE rl.rider_id = m.stale_id
+    );
+
+  DROP TABLE IF EXISTS seeded_profile_map;
+END;
+$$;
 
 INSERT INTO public.restaurants (
   id,
@@ -817,6 +1353,44 @@ WITH real_restaurants (
     ('00000000-0000-4000-9000-000000001018'::uuid, '00000000-0000-4000-9000-000000002018'::uuid, 'Crunch In', 'Crunchy fast-food restaurant listed on Pathao Food.', 'https://storage.pathaofood.live/food/51473_banner.webp?ts=1775535660', 'https://storage.pathaofood.live/food/51473_banner.webp?ts=1775535660', 'https://storage.pathaofood.live/food/51473_logo.webp?ts=1714997797', 'Kathmandu, Nepal', 'Kathmandu, Nepal', 'pathao-guytinzt-crunch-in', 27.7067, 85.3421, '+9779811001018', 'crunch.in@chitomitho.local'),
     ('00000000-0000-4000-9000-000000001019'::uuid, '00000000-0000-4000-9000-000000002019'::uuid, 'Darjeeling Ko Swad', 'Darjeeling-style momo and burger listing on Pathao Food.', 'https://storage.pathaofood.live/food/51099_banner.webp?ts=1738644790', 'https://storage.pathaofood.live/food/51099_banner.webp?ts=1738644790', 'https://storage.pathaofood.live/food/51099_logo.webp?ts=1693295445', 'Kathmandu, Nepal', 'Kathmandu, Nepal', 'pathao-guytaojz-darjeeling-ko-swad', 27.7243, 85.3415, '+9779811001019', 'darjeeling.swad@chitomitho.local'),
     ('00000000-0000-4000-9000-000000001020'::uuid, '00000000-0000-4000-9000-000000002020'::uuid, 'Filipino Bakeshop', 'Bakery with patties, cakes, and pastries listed on Pathao Food.', 'https://storage.pathaofood.live/food/50898_banner.webp?ts=1753950914', 'https://storage.pathaofood.live/food/50898_banner.webp?ts=1753950914', 'https://storage.pathaofood.live/food/50898_logo.webp?ts=1669630609', 'Kathmandu, Nepal', 'Kathmandu, Nepal', 'pathao-guydqojy-filipino-bakeshop', 27.7131, 85.3500, '+9779811001020', 'filipino.bakeshop@chitomitho.local')
+),
+stale_real_auth_users AS (
+  SELECT DISTINCT
+    u.id AS stale_id
+  FROM auth.users u
+  JOIN real_restaurants rr
+    ON u.id <> rr.owner_id
+    AND (
+      LOWER(COALESCE(u.email, '')) = LOWER(rr.contact_email)
+      OR REGEXP_REPLACE(COALESCE(u.phone, ''), '\D', '', 'g')
+         = REGEXP_REPLACE(rr.contact_phone, '\D', '', 'g')
+    )
+),
+archived_real_auth_identities AS (
+  UPDATE auth.identities i
+  SET
+    provider_id = 'archived-' || i.user_id::TEXT,
+    identity_data = (COALESCE(i.identity_data, '{}'::jsonb) - 'phone')
+      || jsonb_build_object('archived_seed_duplicate', TRUE),
+    updated_at = NOW()
+  FROM stale_real_auth_users m
+  WHERE i.user_id = m.stale_id
+    AND i.provider = 'phone'
+  RETURNING i.user_id
+),
+archived_real_auth_users AS (
+  UPDATE auth.users u
+  SET
+    email = 'archived-' || u.id::TEXT || '@chitomitho.local',
+    phone = NULL,
+    raw_app_meta_data = COALESCE(u.raw_app_meta_data, '{}'::jsonb)
+      || jsonb_build_object('archived_seed_duplicate', TRUE),
+    raw_user_meta_data = (COALESCE(u.raw_user_meta_data, '{}'::jsonb) - 'phone')
+      || jsonb_build_object('archived_seed_duplicate', TRUE),
+    updated_at = NOW()
+  FROM stale_real_auth_users m
+  WHERE u.id = m.stale_id
+  RETURNING u.id
 )
 INSERT INTO auth.users (
   instance_id,
@@ -1110,50 +1684,106 @@ SET
   is_available = EXCLUDED.is_available,
   category = EXCLUDED.category;
 
-UPDATE public.customer_orders o
-SET customer_id = m.canonical_id
-FROM pg_temp.seeded_profile_map m
-WHERE o.customer_id = m.stale_id;
+CREATE OR REPLACE FUNCTION public.update_rider_location(
+  p_order_id UUID,
+  p_latitude FLOAT8,
+  p_longitude FLOAT8,
+  p_heading FLOAT8 DEFAULT NULL,
+  p_speed_mps FLOAT8 DEFAULT NULL,
+  p_accuracy_m FLOAT8 DEFAULT NULL
+)
+RETURNS TABLE (
+  order_id UUID,
+  rider_id UUID,
+  latitude FLOAT8,
+  longitude FLOAT8,
+  updated_at TIMESTAMPTZ
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+#variable_conflict use_column
+DECLARE
+  target_order public.customer_orders%ROWTYPE;
+  current_rider_id UUID := auth.uid();
+  location_time TIMESTAMPTZ := NOW();
+BEGIN
+  IF current_rider_id IS NULL THEN
+    RAISE EXCEPTION 'Authentication required.' USING ERRCODE = '42501';
+  END IF;
 
-UPDATE public.customer_orders o
-SET rider_id = m.canonical_id
-FROM pg_temp.seeded_profile_map m
-WHERE o.rider_id = m.stale_id;
+  IF p_latitude IS NULL OR p_latitude < -90 OR p_latitude > 90 THEN
+    RAISE EXCEPTION 'Invalid latitude.' USING ERRCODE = '22023';
+  END IF;
 
-UPDATE public.user_notifications n
-SET user_id = m.canonical_id
-FROM pg_temp.seeded_profile_map m
-WHERE n.user_id = m.stale_id;
+  IF p_longitude IS NULL OR p_longitude < -180 OR p_longitude > 180 THEN
+    RAISE EXCEPTION 'Invalid longitude.' USING ERRCODE = '22023';
+  END IF;
 
-DELETE FROM public.rider_locations rl
-USING pg_temp.seeded_profile_map m
-WHERE rl.rider_id = m.stale_id
-  AND EXISTS (
-    SELECT 1
-    FROM public.rider_locations existing
-    WHERE existing.rider_id = m.canonical_id
-  );
+  SELECT *
+  INTO target_order
+  FROM public.customer_orders AS co
+  WHERE co.id = p_order_id
+    AND co.rider_id = current_rider_id
+    AND co.status IN ('ready_for_pickup', 'picked_up', 'arrived');
 
-UPDATE public.rider_locations rl
-SET rider_id = m.canonical_id
-FROM pg_temp.seeded_profile_map m
-WHERE rl.rider_id = m.stale_id;
+  IF target_order.id IS NULL THEN
+    RAISE EXCEPTION 'Active rider order not found.' USING ERRCODE = 'P0002';
+  END IF;
 
-DELETE FROM auth.users u
-USING pg_temp.seeded_profile_map m
-WHERE u.id = m.stale_id
-  AND NOT EXISTS (
-    SELECT 1 FROM public.restaurants r WHERE r.owner_id = m.stale_id
+  INSERT INTO public.rider_locations AS rl (
+    rider_id,
+    active_order_id,
+    latitude,
+    longitude,
+    heading,
+    speed_mps,
+    accuracy_m,
+    updated_at
   )
-  AND NOT EXISTS (
-    SELECT 1
-    FROM public.customer_orders o
-    WHERE o.customer_id = m.stale_id OR o.rider_id = m.stale_id
+  VALUES (
+    current_rider_id,
+    p_order_id,
+    p_latitude,
+    p_longitude,
+    p_heading,
+    p_speed_mps,
+    p_accuracy_m,
+    location_time
   )
-  AND NOT EXISTS (
-    SELECT 1 FROM public.rider_locations rl WHERE rl.rider_id = m.stale_id
-  );
+  ON CONFLICT ON CONSTRAINT rider_locations_pkey DO UPDATE
+  SET
+    active_order_id = EXCLUDED.active_order_id,
+    latitude = EXCLUDED.latitude,
+    longitude = EXCLUDED.longitude,
+    heading = EXCLUDED.heading,
+    speed_mps = EXCLUDED.speed_mps,
+    accuracy_m = EXCLUDED.accuracy_m,
+    updated_at = EXCLUDED.updated_at;
 
-DROP TABLE IF EXISTS pg_temp.seeded_profile_map;
+  UPDATE public.customer_orders AS co
+  SET
+    rider_lat = p_latitude,
+    rider_lng = p_longitude,
+    rider_heading = p_heading,
+    rider_speed_mps = p_speed_mps,
+    rider_accuracy_m = p_accuracy_m,
+    rider_location_updated_at = location_time,
+    updated_at = location_time
+  WHERE co.id = p_order_id
+    AND co.rider_id = current_rider_id;
+
+  RETURN QUERY
+  SELECT
+    p_order_id AS order_id,
+    current_rider_id AS rider_id,
+    p_latitude AS latitude,
+    p_longitude AS longitude,
+    location_time AS updated_at;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.update_rider_location(UUID, FLOAT8, FLOAT8, FLOAT8, FLOAT8, FLOAT8) TO authenticated;
 
 NOTIFY pgrst, 'reload schema';

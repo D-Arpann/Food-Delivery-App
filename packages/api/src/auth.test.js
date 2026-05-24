@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { AUTH_OTP_LENGTH } from '@repo/utils';
-import { fetchCustomerSettings, verifyOtpAndSyncProfile } from './auth.js';
+import { fetchCustomerSettings, updateCustomerSettings, verifyOtpAndSyncProfile } from './auth.js';
 
 class ProfileQuery {
   constructor(store) {
@@ -168,6 +168,24 @@ describe('phone OTP profile sync', () => {
     assert.deepEqual(store.rpcCalls, []);
   });
 
+  it('normalizes stale rejected auth metadata to pending before profile writes', async () => {
+    const { client, store } = createOtpClient();
+
+    const { data, error } = await verifyOtpAndSyncProfile(client, {
+      phone: '+9779800000999',
+      token: '123456',
+      profile: {
+        full_name: 'Rejected Metadata User',
+        email: 'rejected@example.com',
+        verification_status: 'rejected',
+      },
+    });
+
+    assert.equal(error, null);
+    assert.equal(data.needsSignup, false);
+    assert.equal(store.upsertedProfile.verification_status, 'pending');
+  });
+
   it('does not route seeded admin phones to customer signup when DB sync is missing', async () => {
     const { client, store } = createOtpClient({
       rpcError: {
@@ -230,6 +248,88 @@ describe('OTP configuration', () => {
 });
 
 describe('customer settings', () => {
+  it('does not preserve stale verification status metadata when saving addresses', async () => {
+    let authUpdatePayload = null;
+    let upsertPayload = null;
+    const user = {
+      id: 'customer-id',
+      phone: '+9779800000100',
+      email: 'customer@example.com',
+      user_metadata: {
+        full_name: 'Demo Customer',
+        address: 'Naxal, Kathmandu',
+        verification_status: 'rejected',
+        verificationStatus: 'rejected',
+      },
+    };
+
+    const client = {
+      auth: {
+        async getUser() {
+          return { data: { user }, error: null };
+        },
+        async updateUser(payload) {
+          authUpdatePayload = payload;
+          return {
+            data: {
+              user: {
+                ...user,
+                user_metadata: payload.data,
+              },
+            },
+            error: null,
+          };
+        },
+      },
+      from() {
+        return {
+          select() {
+            return this;
+          },
+          eq() {
+            return this;
+          },
+          async maybeSingle() {
+            return {
+              data: {
+                id: 'customer-id',
+                full_name: 'Demo Customer',
+                email: 'customer@example.com',
+                phone: '+9779800000100',
+                role: 'customer',
+                verification_status: 'verified',
+              },
+              error: null,
+            };
+          },
+          upsert(payload) {
+            upsertPayload = payload;
+            return this;
+          },
+          async single() {
+            return { data: upsertPayload, error: null };
+          },
+        };
+      },
+    };
+
+    const { error } = await updateCustomerSettings(client, {
+      fullName: 'Demo Customer',
+      phone: '+9779800000100',
+      addresses: [{
+        id: 'home',
+        label: 'Home',
+        address: 'Naxal, Kathmandu',
+      }],
+      defaultAddressId: 'home',
+    });
+
+    assert.equal(error, null);
+    assert.equal(authUpdatePayload.data.verification_status, undefined);
+    assert.equal(authUpdatePayload.data.verificationStatus, undefined);
+    assert.equal(upsertPayload.verification_status, undefined);
+  });
+
   it('falls back to base profile columns when rider application columns are not migrated yet', async () => {
     const selects = [];
     const user = {
@@ -318,7 +418,7 @@ describe('seeded OTP accounts', () => {
 
     assert.match(seedSql, /phone_confirmed_at/);
     assert.match(seedSql, /'phone'/);
-    assert.match(seedSql, /CREATE TEMP TABLE seeded_profile_map/);
+    assert.match(seedSql, /CREATE TEMP TABLE seeded_profile_map ON COMMIT DROP AS/);
     assert.match(seedSql, /RIGHT\(REGEXP_REPLACE\(COALESCE\(p\.phone, ''\), '\\D', '', 'g'\), 10\)/);
     assert.match(seedSql, /email = 'archived-' \|\| p\.id::TEXT/);
     assert.match(seedSql, /phone = 'archived-' \|\| p\.id::TEXT/);
@@ -349,10 +449,10 @@ describe('seeded OTP accounts', () => {
 
   it('normalizes seeded auth phones to Supabase format and app profile phones to E.164', () => {
     const migrationsDir = resolve(process.cwd(), 'supabase/migrations');
-    const migrationSql = readFileSync(
-      resolve(migrationsDir, '20260514064047_add_restaurant_rejection_reason.sql'),
-      'utf8',
-    );
+    const migrationSql = readdirSync(migrationsDir)
+      .filter((fileName) => fileName.endsWith('.sql') && fileName !== '000_wipe_database.sql')
+      .map((fileName) => readFileSync(resolve(migrationsDir, fileName), 'utf8'))
+      .join('\n');
 
     assert.match(migrationSql, /UPDATE auth\.users[\s\S]*phone ~ '\^\\\+977\[0-9\]\{10\}\$'/);
     assert.match(migrationSql, /UPDATE public\.user_profiles[\s\S]*phone ~ '\^977\[0-9\]\{10\}\$'/);
@@ -360,7 +460,7 @@ describe('seeded OTP accounts', () => {
     assert.match(migrationSql, /CREATE TEMP TABLE seeded_owner_profile_map/);
     assert.match(migrationSql, /UPDATE public\.restaurants[\s\S]*owner_id = m\.canonical_id/);
     assert.match(migrationSql, /DELETE FROM auth\.users[\s\S]*u\.id = m\.stale_id/);
-    assert.match(migrationSql, /CREATE TEMP TABLE seeded_orphan_phone_auth_map/);
+    assert.match(migrationSql, /WITH seeded_orphan_phone_auth_map AS/);
     assert.match(migrationSql, /REGEXP_REPLACE\(COALESCE\(canonical\.phone, ''\), '\\D', '', 'g'\)/);
   });
 
